@@ -216,7 +216,7 @@ const MainCalendar: React.FC<{
                 currentView === 'week' ||
                 currentView === 'month-detailed' ||
                 currentView === 'quarter-detailed') && (
-                <div className='flex border-b border-gray-200 bg-gray-50'>
+                <div className='w-full bg-pink-300 flex border-b border-gray-200 bg-gray-50'>
                     <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-800'>
                         Daily Notes
                     </div>
