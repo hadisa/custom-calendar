@@ -272,7 +272,7 @@ const MainCalendar: React.FC<{
                     <div key={group.id} className='mb-2 last:mb-0'>
                         {/* Group Header Row */}
                         <div
-                            className='w-full flex cursor-pointer border-t border-b border-gray-300 bg-gray-200 transition duration-150 ease-in-out hover:bg-gray-300'
+                            className='w-full flex cursor-pointer border-t border-b pg-green-700 border-gray-300 bg-gray-200 transition duration-150 ease-in-out hover:bg-gray-300'
                             onClick={() => toggleGroupExpansion(group.id)}>
                             <div className='flex w-32 flex-shrink-0 items-center justify-between border-r border-gray-300 p-3 text-sm font-bold text-gray-900'>
                                 <span>{group.name}</span>
