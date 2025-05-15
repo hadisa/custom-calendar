@@ -1,0 +1,936 @@
+'use client';
+
+// This directive is crucial for client-side functionality in Next.js
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+
+// Import shadcn/ui components from the specified path
+import { Button } from '@/registry/new-york-v4/ui/button';
+import { Calendar } from '@/registry/new-york-v4/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/registry/new-york-v4/ui/popover';
+
+import {
+    addDays,
+    addMonths,
+    addQuarters,
+    endOfMonth,
+    endOfQuarter,
+    endOfWeek,
+    format,
+    getMonth,
+    getQuarter,
+    getYear,
+    isSameDay,
+    isSameMonth,
+    parseISO,
+    startOfMonth,
+    startOfQuarter,
+    startOfWeek,
+    subMonths,
+    subQuarters
+} from 'date-fns';
+
+// --- Utility for Tailwind CSS class merging (simplified clsx/tailwind-merge) ---
+type ClassValue = string | boolean | null | undefined;
+function cn(...inputs: ClassValue[]) {
+    return inputs.filter(Boolean).join(' ');
+}
+
+// --- Type Definitions ---
+
+/**
+ * @interface ShiftGroup
+ * Defines the structure for a group of resources (e.g., a department, a team).
+ * Each group has a unique ID, a name, and now an `isExpanded` property to control visibility.
+ */
+interface ShiftGroup {
+    id: string;
+    name: string;
+    isExpanded: boolean; // Added for expand/collapse functionality
+}
+
+/**
+ * @interface Resource
+ * Defines the structure for a calendar resource, such as an employee.
+ * Includes a `groupId` to link it to a ShiftGroup.
+ */
+interface Resource {
+    id: string;
+    name: string;
+    color: string; // Hex color for visual distinction
+    groupId: string; // ID of the shift group this resource belongs to
+}
+
+/**
+ * @interface ShiftEvent
+ * Defines the structure for a single shift or event on the calendar.
+ */
+interface ShiftEvent {
+    id: string;
+    resourceId: string;
+    title: string;
+    start: Date;
+    end: Date;
+}
+
+/**
+ * @interface CalendarContextType
+ * Defines the shape of the context object that will be provided to child components.
+ * Now includes `shiftGroups` and `toggleGroupExpansion`.
+ */
+interface CalendarContextType {
+    shiftGroups: ShiftGroup[];
+    resources: Resource[];
+    events: ShiftEvent[];
+    addEvent: (event: Omit<ShiftEvent, 'id'>) => void;
+    toggleGroupExpansion: (groupId: string) => void; // Added for toggling group expansion
+}
+
+// --- Context Creation ---
+const CalendarContext = createContext<CalendarContextType | undefined>(undefined);
+
+/**
+ * @function useCalendar
+ * A custom hook to consume the CalendarContext.
+ */
+const useCalendar = () => {
+    const context = useContext(CalendarContext);
+    if (!context) {
+        throw new Error('useCalendar must be used within a CalendarProvider');
+    }
+
+    return context;
+};
+
+// --- Utility Functions ---
+const getDaysInWeek = (startDate: Date): Date[] => {
+    const day = startDate.getDay(); // 0 for Sunday, 1 for Monday, etc.
+    const startOfWeekDate = startOfWeek(startDate, { weekStartsOn: 0 }); // Ensure week starts on Sunday
+
+    return Array.from({ length: 7 }).map((_, i) => addDays(startOfWeekDate, i));
+};
+
+const formatTime = (date: Date): string => {
+    return format(date, 'hh:mm a'); // e.g., "09:00 AM"
+};
+
+const formatDateHeader = (date: Date): string => {
+    return format(date, 'EEE d'); // e.g., "Mon 24"
+};
+
+// --- Components ---
+
+const Event: React.FC<{
+    event: ShiftEvent;
+    resourceColor: string;
+    currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed';
+}> = ({ event, resourceColor, currentView }) => {
+    const startMinutes = event.start.getHours() * 60 + event.start.getMinutes();
+    const endMinutes = event.end.getHours() * 60 + event.end.getMinutes();
+    const durationMinutes = endMinutes - startMinutes;
+
+    if (currentView === 'day') {
+        // Horizontal positioning for Day view
+        const leftPosition = (startMinutes / (24 * 60)) * 100;
+        const eventWidth = (durationMinutes / (24 * 60)) * 100;
+
+        return (
+            <div
+                className='absolute z-10 rounded-md p-1 text-xs font-medium text-white shadow-md'
+                style={{
+                    backgroundColor: resourceColor,
+                    top: '2px', // Small offset from top
+                    height: 'calc(100% - 4px)', // Fill height
+                    left: `${leftPosition}%`,
+                    width: `${eventWidth}%`,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: '40px'
+                }}
+                title={`${event.title} (${formatTime(event.start)} - ${formatTime(event.end)})`}>
+                {event.title}
+                <span className='ml-1 text-gray-100 opacity-80'>{formatTime(event.start)}</span>
+            </div>
+        );
+    } else {
+        // 'week', 'month-detailed', or 'quarter-detailed' view - simple block stacking
+        return (
+            <div
+                className='relative mb-1 rounded-md p-1 text-xs font-medium text-white shadow-md' // mb-1 for stacking
+                style={{
+                    backgroundColor: resourceColor,
+                    width: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                }}
+                title={`${event.title} (${formatTime(event.start)} - ${formatTime(event.end)})`}>
+                {event.title}
+                <span className='ml-1 text-gray-100 opacity-80'>{formatTime(event.end)}</span>
+            </div>
+        );
+    }
+};
+
+/**
+ * @component ResourceRow
+ * Renders a single resource's row, displaying their name and events.
+ */
+const ResourceRow: React.FC<{
+    resource: Resource;
+    daysInView: Date[];
+    currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed';
+}> = ({ resource, daysInView, currentView }) => {
+    const { events } = useCalendar();
+
+    const resourceEvents = events.filter(
+        (event) => event.resourceId === resource.id && daysInView.some((day) => isSameDay(day, event.start))
+    );
+
+    // For Day view, we need horizontal hourly grid lines
+    const dayViewHourlyMarkers = Array.from({ length: 24 }).map((_, i) => i * 60);
+
+    return (
+        <div className='flex border-b border-gray-200 last:border-b-0'>
+            <div className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-200 bg-gray-50 p-3 text-sm font-semibold text-gray-800'>
+                {resource.name}
+            </div>
+            <div className='flex flex-grow'>
+                {daysInView.map((day) => (
+                    <div
+                        key={day.toISOString()}
+                        className='relative flex-1 border-r border-gray-200 last:border-r-0'
+                        style={{ height: '100px' }} // Fixed height for rows in all detailed views
+                    >
+                        {currentView === 'day' &&
+                            dayViewHourlyMarkers.map((minutes) => (
+                                <div
+                                    key={`grid-day-${day.toISOString()}-${minutes}`}
+                                    className={cn(
+                                        'absolute h-full border-r border-gray-100',
+                                        minutes % 60 === 0 ? 'border-gray-200' : 'border-gray-100' // Thicker line for full hours
+                                    )}
+                                    style={{ left: `${(minutes / (24 * 60)) * 100}%` }}></div>
+                            ))}
+
+                        {/* Render events for this specific day and resource */}
+                        {resourceEvents
+                            .filter((event) => isSameDay(event.start, day))
+                            .map((event) => (
+                                <Event
+                                    key={event.id}
+                                    event={event}
+                                    resourceColor={resource.color}
+                                    currentView={currentView}
+                                />
+                            ))}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+/**
+ * @component ShiftForm
+ * A form component to add new shift events.
+ */
+const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
+    const { resources, addEvent } = useCalendar();
+    const [resourceId, setResourceId] = useState<string>(resources[0]?.id || '');
+    const [title, setTitle] = useState<string>('');
+    const [startDate, setStartDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+    const [startTime, setStartTime] = useState<string>('09:00');
+    const [endDate, setEndDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+    const [endTime, setEndTime] = useState<string>('17:00');
+    const [errorMessage, setErrorMessage] = useState<string>('');
+
+    useEffect(() => {
+        if (isOpen) {
+            setResourceId(resources[0]?.id || '');
+            setTitle('');
+            setStartDate(format(new Date(), 'yyyy-MM-dd'));
+            setStartTime('09:00');
+            setEndDate(format(new Date(), 'yyyy-MM-dd'));
+            setEndTime('17:00');
+            setErrorMessage('');
+        }
+    }, [isOpen, resources]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        setErrorMessage('');
+
+        const startDateTime = parseISO(`${startDate}T${startTime}:00`);
+        const endDateTime = parseISO(`${endDate}T${endTime}:00`);
+
+        if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+            setErrorMessage('Invalid date or time format.');
+
+            return;
+        }
+
+        if (endDateTime <= startDateTime) {
+            setErrorMessage('End time must be after start time.');
+
+            return;
+        }
+
+        if (!resourceId || !title.trim()) {
+            setErrorMessage('Please select a resource and enter a title.');
+
+            return;
+        }
+
+        addEvent({
+            resourceId,
+            title: title.trim(),
+            start: startDateTime,
+            end: endDateTime
+        });
+        onClose();
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className='bg-opacity-50 fixed inset-0 z-50 flex items-center justify-center bg-gray-600'>
+            <div className='w-full max-w-md rounded-lg bg-white p-6 shadow-xl'>
+                <h2 className='mb-4 text-2xl font-bold text-gray-800'>Add New Shift</h2>
+                <form onSubmit={handleSubmit}>
+                    {errorMessage && (
+                        <div
+                            className='relative mb-4 rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700'
+                            role='alert'>
+                            <span className='block sm:inline'>{errorMessage}</span>
+                        </div>
+                    )}
+
+                    <div className='mb-4'>
+                        <label htmlFor='resource' className='mb-2 block text-sm font-semibold text-gray-700'>
+                            Resource:
+                        </label>
+                        <select
+                            id='resource'
+                            className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                            value={resourceId}
+                            onChange={(e) => setResourceId(e.target.value)}
+                            required>
+                            {resources.map((res) => (
+                                <option key={res.id} value={res.id}>
+                                    {res.name} (Group: {resources.find((r) => r.id === res.id)?.groupId || 'N/A'}){' '}
+                                    {/* Show group name for context */}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className='mb-4'>
+                        <label htmlFor='title' className='mb-2 block text-sm font-semibold text-gray-700'>
+                            Shift Title:
+                        </label>
+                        <input
+                            type='text'
+                            id='title'
+                            className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder='e.g., Morning Shift, Meeting'
+                            required
+                        />
+                    </div>
+
+                    <div className='mb-4 grid grid-cols-2 gap-4'>
+                        <div>
+                            <label htmlFor='startDate' className='mb-2 block text-sm font-semibold text-gray-700'>
+                                Start Date:
+                            </label>
+                            <input
+                                type='date'
+                                id='startDate'
+                                className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor='startTime' className='mb-2 block text-sm font-semibold text-gray-700'>
+                                Start Time:
+                            </label>
+                            <input
+                                type='time'
+                                id='startTime'
+                                className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                                value={startTime}
+                                onChange={(e) => setStartTime(e.target.value)}
+                                required
+                            />
+                        </div>
+                    </div>
+
+                    <div className='mb-6 grid grid-cols-2 gap-4'>
+                        <div>
+                            <label htmlFor='endDate' className='mb-2 block text-sm font-semibold text-gray-700'>
+                                End Date:
+                            </label>
+                            <input
+                                type='date'
+                                id='endDate'
+                                className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor='endTime' className='mb-2 block text-sm font-semibold text-gray-700'>
+                                End Time:
+                            </label>
+                            <input
+                                type='time'
+                                id='endTime'
+                                className='w-full appearance-none rounded border px-3 py-2 leading-tight text-gray-700 shadow focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                                value={endTime}
+                                onChange={(e) => setEndTime(e.target.value)}
+                                required
+                            />
+                        </div>
+                    </div>
+
+                    <div className='flex justify-end gap-2'>
+                        <Button type='button' variant='secondary' onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button type='submit'>Add Shift</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * @component MainCalendar
+ * The main calendar component that displays the week view,
+ * including date headers and grouped resource rows with their respective events.
+ * Renamed from Calendar to avoid naming conflict with the date picker Calendar component.
+ */
+const MainCalendar: React.FC<{
+    currentWeekStart: Date;
+    currentView: 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed';
+}> = ({ currentWeekStart, currentView }) => {
+    const { shiftGroups, resources, toggleGroupExpansion, events } = useCalendar(); // Destructure events here
+
+    // Determine which days/columns to display based on the current view
+    let columnsToDisplay: Date[] = [];
+    let headerColumns: { label: string; key: string }[] = []; // For day view hours
+
+    if (currentView === 'week') {
+        columnsToDisplay = getDaysInWeek(currentWeekStart);
+    } else if (currentView === 'day') {
+        columnsToDisplay = [currentWeekStart]; // Single day for the column
+        headerColumns = Array.from({ length: 24 }).map((_, i) => ({
+            label: format(new Date(2000, 0, 1, i), 'ha').toLowerCase(), // e.g., 12am, 1am
+            key: `hour-header-${i}`
+        }));
+    } else if (currentView === 'month' || currentView === 'month-detailed') {
+        const startOfCurrentMonth = startOfMonth(currentWeekStart);
+        const endOfCurrentMonth = endOfMonth(currentWeekStart);
+        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 }); // Start from Sunday of the first week
+        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 }); // End on Saturday of the last week
+
+        let currentDay = startDay;
+        while (currentDay <= endDay) {
+            columnsToDisplay.push(currentDay);
+            currentDay = addDays(currentDay, 1);
+        }
+    } else if (currentView === 'quarter-detailed') {
+        const startOfCurrentQuarter = startOfQuarter(currentWeekStart);
+        const endOfCurrentQuarter = endOfQuarter(currentWeekStart);
+        const startDay = startOfWeek(startOfCurrentQuarter, { weekStartsOn: 0 });
+        const endDay = endOfWeek(endOfCurrentQuarter, { weekStartsOn: 0 });
+
+        let currentDay = startDay;
+        while (currentDay <= endDay) {
+            columnsToDisplay.push(currentDay);
+            currentDay = addDays(currentDay, 1);
+        }
+    }
+
+    // Render different layouts based on currentView
+    if (currentView === 'year') {
+        const months = Array.from({ length: 12 }).map((_, i) => new Date(currentWeekStart.getFullYear(), i, 1));
+
+        return (
+            <div className='flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+                <h2 className='mb-4 text-center text-2xl font-bold'>{currentWeekStart.getFullYear()} Year View</h2>
+                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'>
+                    {months.map((monthDate) => (
+                        <div key={monthDate.toISOString()} className='rounded-lg border bg-gray-50 p-4 text-center'>
+                            <h3 className='mb-2 text-lg font-semibold'>{format(monthDate, 'MMMM')}</h3>
+                            {/* Placeholder for month summary - can be expanded later */}
+                            <p className='text-sm text-gray-600'>
+                                Events:{' '}
+                                {
+                                    events.filter(
+                                        (e) =>
+                                            getMonth(e.start) === getMonth(monthDate) &&
+                                            getYear(e.start) === getYear(monthDate)
+                                    ).length
+                                }
+                            </p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    } else if (currentView === 'quarter') {
+        const currentQuarter = getQuarter(currentWeekStart);
+        const startOfCurrentQuarter = startOfQuarter(currentWeekStart);
+        const endOfCurrentQuarter = endOfQuarter(currentWeekStart);
+
+        const monthsInQuarter = Array.from({ length: 3 }).map((_, i) => addMonths(startOfCurrentQuarter, i));
+
+        return (
+            <div className='flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+                <h2 className='mb-4 text-center text-2xl font-bold'>
+                    {format(startOfCurrentQuarter, 'MMM d')} - {format(endOfCurrentQuarter, 'MMM d,yyyy')} Quarter View
+                </h2>
+                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3'>
+                    {monthsInQuarter.map((monthDate) => (
+                        <div key={monthDate.toISOString()} className='rounded-lg border bg-gray-50 p-4 text-center'>
+                            <h3 className='mb-2 text-lg font-semibold'>{format(monthDate, 'MMMM')}</h3>
+                            <p className='text-sm text-gray-600'>
+                                Events:{' '}
+                                {
+                                    events.filter(
+                                        (e) =>
+                                            getMonth(e.start) === getMonth(monthDate) &&
+                                            getYear(e.start) === getYear(monthDate)
+                                    ).length
+                                }
+                            </p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    } else if (currentView === 'month') {
+        // Summary Month view
+        const startOfCurrentMonth = startOfMonth(currentWeekStart);
+        const endOfCurrentMonth = endOfMonth(currentWeekStart);
+        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 }); // Start from Sunday of the first week
+        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 }); // End on Saturday of the last week
+
+        let currentDay = startDay;
+        const allDaysInMonthView: Date[] = [];
+        while (currentDay <= endDay) {
+            allDaysInMonthView.push(currentDay);
+            currentDay = addDays(currentDay, 1);
+        }
+
+        const daysOfWeekHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        return (
+            <div className='flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+                <h2 className='mb-4 text-center text-2xl font-bold'>
+                    {format(currentWeekStart, 'MMMM,yyyy')} Month View
+                </h2>
+                <div className='mb-2 grid grid-cols-7 text-center font-semibold text-gray-600'>
+                    {daysOfWeekHeaders.map((day) => (
+                        <div key={day}>{day}</div>
+                    ))}
+                </div>
+                <div className='grid grid-cols-7 gap-1'>
+                    {allDaysInMonthView.map((day) => (
+                        <div
+                            key={day.toISOString()}
+                            className={cn(
+                                'flex h-24 flex-col items-center justify-start rounded-md border p-2',
+                                isSameMonth(day, currentWeekStart) ? 'bg-gray-50' : 'bg-gray-100 text-gray-400'
+                            )}>
+                            <span className='text-sm font-medium'>{format(day, 'd')}</span>
+                            <p className='mt-1 text-xs text-gray-600'>
+                                Events: {events.filter((e) => isSameDay(e.start, day)).length}
+                            </p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    // Default rendering for 'week', 'day', 'month-detailed', and 'quarter-detailed' views
+    return (
+        <div className='flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-md'>
+            {/* Calendar Header: Groups/Resources, and Days/Hours */}
+            <div className='flex border-b border-gray-200 bg-gray-100'>
+                <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'>
+                    Groups/Resources
+                </div>
+                {/* Render "24 Hrs" header for 'day' view */}
+                {currentView === 'day' && (
+                    <div className='w-16 flex-shrink-0 border-r border-gray-200 p-3 text-center text-sm font-semibold text-gray-600'>
+                        24 Hrs
+                    </div>
+                )}
+                {/* Render hours for 'day' view, or dates for 'week'/'month-detailed'/'quarter-detailed' view */}
+                {currentView === 'day'
+                    ? headerColumns.map((col) => (
+                          <div
+                              key={col.key}
+                              className='flex-1 border-r border-gray-200 p-3 text-center text-xs font-semibold text-gray-600'>
+                              {col.label}
+                          </div>
+                      ))
+                    : (columnsToDisplay as Date[]).map((day) => (
+                          <div
+                              key={day.toISOString()}
+                              className='flex-1 border-r border-gray-200 p-3 text-center text-sm font-semibold text-gray-600'>
+                              {formatDateHeader(day)}
+                          </div>
+                      ))}
+            </div>
+
+            {/* Calendar Body: Shift Groups and Resource Rows */}
+            <div className='flex-grow overflow-y-auto' style={{ maxHeight: 'calc(100vh - 250px)' }}>
+                <div className='flex'>
+                    {/* Main Calendar Content Area */}
+                    <div className='flex-grow'>
+                        {shiftGroups.map((group) => (
+                            <div key={group.id} className='mb-2 last:mb-0'>
+                                {/* Group Header Row */}
+                                <div
+                                    className='flex cursor-pointer border-t border-b border-gray-300 bg-gray-200 transition duration-150 ease-in-out hover:bg-gray-300'
+                                    onClick={() => toggleGroupExpansion(group.id)}>
+                                    <div className='flex w-32 flex-shrink-0 items-center justify-between border-r border-gray-300 p-3 text-sm font-bold text-gray-900'>
+                                        <span>{group.name}</span>
+                                        {/* Arrow icon for expand/collapse */}
+                                        <svg
+                                            className={`h-4 w-4 transform text-gray-700 transition-transform duration-200 ${
+                                                group.isExpanded ? 'rotate-90' : ''
+                                            }`}
+                                            fill='none'
+                                            stroke='currentColor'
+                                            viewBox='0 0 24 24'
+                                            xmlns='http://www.w3.org/2000/svg'>
+                                            <path
+                                                strokeLinecap='round'
+                                                strokeLinejoin='round'
+                                                strokeWidth='2'
+                                                d='M9 5l7 7-7 7'></path>
+                                        </svg>
+                                    </div>
+                                    {/* Conditional empty cell for '24 Hrs' column in Day view */}
+                                    {currentView === 'day' && (
+                                        <div className='w-16 flex-shrink-0 border-r border-gray-300'></div>
+                                    )}
+                                    <div className='flex-grow p-3 text-sm font-semibold text-gray-600'>
+                                        {/* Empty cell for group header spanning days/hours */}
+                                    </div>
+                                </div>
+
+                                {/* Resources belonging to this group - conditionally rendered */}
+                                {group.isExpanded && (
+                                    <div className='overflow-hidden transition-all duration-300 ease-in-out'>
+                                        {resources
+                                            .filter((res) => res.groupId === group.id)
+                                            .map((resource) => (
+                                                <ResourceRow
+                                                    key={resource.id}
+                                                    resource={resource}
+                                                    daysInView={
+                                                        currentView === 'day'
+                                                            ? [currentWeekStart]
+                                                            : (columnsToDisplay as Date[])
+                                                    }
+                                                    currentView={currentView}
+                                                />
+                                            ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * @component App
+ * The root component of the Microsoft Shifts calendar application.
+ * Manages the global state for shift groups, resources, and events.
+ */
+const App: React.FC = () => {
+    // Mock data for initial state - use deterministic dates to avoid hydration errors
+    const today = new Date(2025, 4, 26, 0, 0, 0); // May 26, 2025, 00:00:00 (fixed for consistent SSR)
+
+    const [shiftGroups, setShiftGroups] = useState<ShiftGroup[]>([
+        { id: 'group-ops', name: 'Operations Team', isExpanded: true },
+        { id: 'group-sales', name: 'Sales Department', isExpanded: true },
+        { id: 'group-support', name: 'Customer Support', isExpanded: true }
+    ]);
+
+    const [resources, setResources] = useState<Resource[]>([
+        { id: 'res-1', name: 'Alice Johnson', color: '#EF4444', groupId: 'group-ops' },
+        { id: 'res-2', name: 'Bob Williams', color: '#3B82F6', groupId: 'group-ops' },
+        { id: 'res-3', name: 'Charlie Brown', color: '#10B981', groupId: 'group-sales' },
+        { id: 'res-4', name: 'Diana Prince', color: '#F59E0B', groupId: 'group-sales' },
+        { id: 'res-5', name: 'Eve Davis', color: '#6366F1', groupId: 'group-support' }
+    ]);
+
+    const [events, setEvents] = useState<ShiftEvent[]>([
+        {
+            id: 'evt-1',
+            resourceId: 'res-1',
+            title: 'Morning Shift',
+            start: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 0, 0),
+            end: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 13, 0, 0)
+        },
+        {
+            id: 'evt-2',
+            resourceId: 'res-2',
+            title: 'Afternoon Shift',
+            start: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 13, 0, 0),
+            end: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 0, 0)
+        },
+        {
+            id: 'evt-3',
+            resourceId: 'res-1',
+            title: 'Team Meeting',
+            start: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 9, 0, 0), // Tomorrow
+            end: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 11, 0, 0)
+        },
+        {
+            id: 'evt-4',
+            resourceId: 'res-3',
+            title: 'Client Call',
+            start: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2, 10, 0, 0),
+            end: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2, 12, 0, 0)
+        },
+        {
+            id: 'evt-5',
+            resourceId: 'res-5',
+            title: 'Support Desk',
+            start: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 10, 0, 0), // Yesterday
+            end: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 18, 0, 0)
+        }
+    ]);
+
+    const [currentWeekStart, setCurrentWeekStart] = useState<Date>(today); // Initialize with deterministic date
+    const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+    const [currentView, setCurrentView] = useState<
+        'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed'
+    >('week'); // Added 'quarter-detailed' to view options
+
+    // Directly update currentWeekStart when a date is selected from the Calendar
+    const handleDateSelect = (date: Date | undefined) => {
+        if (date) {
+            setCurrentWeekStart(date);
+            setIsDatePickerOpen(false); // Close popover after selection
+        }
+    };
+
+    const addEvent = (newEvent: Omit<ShiftEvent, 'id'>) => {
+        setEvents((prevEvents) => [
+            ...prevEvents,
+            { ...newEvent, id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` }
+        ]);
+    };
+
+    /**
+     * @function toggleGroupExpansion
+     * Toggles the `isExpanded` state for a specific shift group.
+     * @param {string} groupId - The ID of the group to toggle.
+     */
+    const toggleGroupExpansion = (groupId: string) => {
+        setShiftGroups((prevGroups) =>
+            prevGroups.map((group) => (group.id === groupId ? { ...group, isExpanded: !group.isExpanded } : group))
+        );
+    };
+
+    // Generic navigation for previous/next based on current view
+    const goToPrevious = () => {
+        setCurrentWeekStart((prev) => {
+            let newDate = new Date(prev);
+            if (currentView === 'week') {
+                newDate.setDate(prev.getDate() - 7);
+            } else if (currentView === 'day') {
+                newDate.setDate(prev.getDate() - 1);
+            } else if (currentView === 'month' || currentView === 'month-detailed') {
+                newDate = subMonths(newDate, 1);
+            } else if (currentView === 'year') {
+                newDate.setFullYear(prev.getFullYear() - 1);
+            } else if (currentView === 'quarter' || currentView === 'quarter-detailed') {
+                newDate = subQuarters(newDate, 1);
+            }
+
+            return newDate;
+        });
+    };
+
+    const goToNext = () => {
+        setCurrentWeekStart((prev) => {
+            let newDate = new Date(prev);
+            if (currentView === 'week') {
+                newDate.setDate(prev.getDate() + 7);
+            } else if (currentView === 'day') {
+                newDate.setDate(prev.getDate() + 1);
+            } else if (currentView === 'month' || currentView === 'month-detailed') {
+                newDate = addMonths(newDate, 1);
+            } else if (currentView === 'year') {
+                newDate.setFullYear(prev.getFullYear() + 1);
+            } else if (currentView === 'quarter' || currentView === 'quarter-detailed') {
+                newDate = addQuarters(newDate, 1);
+            }
+
+            return newDate;
+        });
+    };
+
+    // Provide the context value including shiftGroups and toggleGroupExpansion
+    const calendarContextValue: CalendarContextType = {
+        shiftGroups,
+        resources,
+        events,
+        addEvent,
+        toggleGroupExpansion
+    };
+
+    return (
+        <CalendarContext.Provider value={calendarContextValue}>
+            <div className='min-h-screen bg-gray-100 p-4 font-sans text-gray-900 antialiased'>
+                <style>
+                    {`
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+          body {
+            font-family: 'Inter', sans-serif;
+          }
+          `}
+                </style>
+                <script src='https://cdn.tailwindcss.com'></script>
+
+                <div className='mx-auto max-w-7xl py-6 sm:px-6 lg:px-8'>
+                    <h1 className='mb-6 text-center text-3xl font-bold text-gray-900'>
+                        Microsoft Shifts Clone (with Groups & shadcn UI)
+                    </h1>
+                    <div className='mb-6 flex items-center justify-between'>
+                        <div className='flex space-x-2'>
+                            <Button onClick={goToPrevious} variant='outline'>
+                                &larr; Previous{' '}
+                                {currentView === 'week'
+                                    ? 'Week'
+                                    : currentView === 'day'
+                                      ? 'Day'
+                                      : currentView === 'month' || currentView === 'month-detailed'
+                                        ? 'Month'
+                                        : currentView === 'year'
+                                          ? 'Year'
+                                          : 'Quarter'}
+                            </Button>
+                            <Button onClick={goToNext} variant='outline'>
+                                Next{' '}
+                                {currentView === 'week'
+                                    ? 'Week'
+                                    : currentView === 'day'
+                                      ? 'Day'
+                                      : currentView === 'month' || currentView === 'month-detailed'
+                                        ? 'Month'
+                                        : currentView === 'year'
+                                          ? 'Year'
+                                          : 'Quarter'}{' '}
+                                &rarr;
+                            </Button>
+                        </div>
+
+                        {/* View Selection Buttons */}
+                        <div className='flex space-x-2'>
+                            <Button
+                                variant={currentView === 'day' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('day')}>
+                                Day
+                            </Button>
+                            <Button
+                                variant={currentView === 'week' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('week')}>
+                                Week
+                            </Button>
+                            <Button
+                                variant={currentView === 'month' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('month')}>
+                                Month
+                            </Button>
+                            <Button
+                                variant={currentView === 'month-detailed' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('month-detailed')}>
+                                Month (Detailed)
+                            </Button>
+                            <Button
+                                variant={currentView === 'quarter' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('quarter')}>
+                                Quarter
+                            </Button>
+                            <Button
+                                variant={currentView === 'quarter-detailed' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('quarter-detailed')}>
+                                Quarter (Detailed)
+                            </Button>
+                            <Button
+                                variant={currentView === 'year' ? 'default' : 'outline'}
+                                onClick={() => setCurrentView('year')}>
+                                Year
+                            </Button>
+                        </div>
+
+                        {/* Date Picker using shadcn/ui components */}
+                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant={'outline'}
+                                    className={cn('w-[280px] justify-start text-left font-normal')}>
+                                    <svg
+                                        xmlns='http://www.w3.org/2000/svg'
+                                        width='24'
+                                        height='24'
+                                        viewBox='0 0 24 24'
+                                        fill='none'
+                                        stroke='currentColor'
+                                        strokeWidth='2'
+                                        strokeLinecap='round'
+                                        strokeLinejoin='round'
+                                        className='mr-2 h-4 w-4'>
+                                        <rect width='18' height='18' x='3' y='4' rx='2' ry='2'></rect>
+                                        <line x1='16' x2='16' y1='2' y2='6'></line>
+                                        <line x1='8' x2='8' y1='2' y2='6'></line>
+                                        <line x1='3' x2='21' y1='10' y2='10'></line>
+                                    </svg>
+                                    {currentWeekStart ? format(currentWeekStart, 'PPP') : <span>Pick a date</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className='w-auto p-0'>
+                                <Calendar
+                                    mode='single'
+                                    selected={currentWeekStart} // Calendar now directly uses currentWeekStart
+                                    onSelect={handleDateSelect} // Updates currentWeekStart and closes popover
+                                    initialFocus
+                                />
+                            </PopoverContent>
+                        </Popover>
+
+                        <Button onClick={() => setIsFormOpen(true)}>Add New Shift</Button>
+                    </div>
+                    <MainCalendar currentWeekStart={currentWeekStart} currentView={currentView} />{' '}
+                    {/* Pass currentView */}
+                </div>
+
+                <ShiftForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} />
+            </div>
+        </CalendarContext.Provider>
+    );
+};
+
+export default App;
