@@ -8,16 +8,16 @@ import { Button } from "@/registry/new-york-v4/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/registry/new-york-v4/ui/popover";
 import { Calendar } from "@/registry/new-york-v4/ui/calendar";
 
+// Firebase Imports
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+
 // --- Utility for Tailwind CSS class merging (simplified clsx/tailwind-merge) ---
 type ClassValue = string | boolean | null | undefined;
 function cn(...inputs: ClassValue[]) {
   return inputs.filter(Boolean).join(' ');
 }
-
-// --- Global Constants for Calendar Layout ---
-const DAY_VIEW_HOUR_WIDTH_PX = 50; // Width of each hour column in Day view
-const DAY_VIEW_TOTAL_WIDTH_PX = 24 * DAY_VIEW_HOUR_WIDTH_PX; // Total width of the 24-hour timeline in Day view
-const DEFAULT_DAY_COLUMN_MIN_WIDTH_PX = 120; // Default minimum width for day columns in week/month/quarter detailed views
 
 // --- Type Definitions ---
 
@@ -65,10 +65,11 @@ interface CalendarContextType {
   shiftGroups: ShiftGroup[];
   resources: Resource[];
   events: ShiftEvent[];
-  addEvent: (event: Omit<ShiftEvent, 'id'>) => void; // Reverted to sync
-  toggleGroupExpansion: (groupId: string) => void; // Reverted to sync
-  deleteEvent: (eventId: string) => void; // Reverted to sync
-  // Removed userId, isLoading
+  addEvent: (event: Omit<ShiftEvent, 'id'>) => Promise<void>; // Now async
+  toggleGroupExpansion: (groupId: string) => Promise<void>; // Now async
+  deleteEvent: (eventId: string) => Promise<void>; // Added delete event
+  userId: string | null; // Expose userId
+  isLoading: boolean; // Loading state for data fetching
 }
 
 // --- Context Creation ---
@@ -83,7 +84,8 @@ const useCalendar = () => {
   if (!context) {
     throw new Error('useCalendar must be used within a CalendarProvider');
   }
-  return context;
+  
+return context;
 };
 
 // --- Utility Functions ---
@@ -106,16 +108,16 @@ const formatDateHeader = (date: Date): string => {
 
 // --- Components ---
 
-const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed' | 'year-detailed' }> = ({ event, resourceColor, currentView }) => {
+const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed' }> = ({ event, resourceColor, currentView }) => {
   const startMinutes = event.start.getHours() * 60 + event.start.getMinutes();
   const endMinutes = event.end.getHours() * 60 + event.end.getMinutes();
   const durationMinutes = endMinutes - startMinutes;
   const { deleteEvent } = useCalendar(); // Get deleteEvent from context
 
-  const handleDelete = (e: React.MouseEvent) => { // Removed async
+  const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent cell click from firing
     if (window.confirm(`Are you sure you want to delete "${event.title}"?`)) {
-      deleteEvent(event.id); // Removed await
+      await deleteEvent(event.id);
     }
   };
 
@@ -123,7 +125,8 @@ const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: '
     // Horizontal positioning for Day view
     const leftPosition = (startMinutes / (24 * 60)) * 100;
     const eventWidth = (durationMinutes / (24 * 60)) * 100;
-    return (
+    
+return (
       <div
         className="absolute rounded-md p-1 text-xs font-medium text-white shadow-md z-10 group" // Added group for hover effects
         style={{
@@ -140,6 +143,7 @@ const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: '
         title={`${event.title} (${formatTime(event.start)} - ${formatTime(event.end)})`}
       >
         {event.title}
+        <span className="ml-1 text-gray-100 opacity-80">{formatTime(event.start)}</span>
         <button
           onClick={handleDelete}
           className="absolute top-0 right-0 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200"
@@ -149,8 +153,8 @@ const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: '
         </button>
       </div>
     );
-  } else if (currentView === 'month-detailed' || currentView === 'quarter-detailed' || currentView === 'year-detailed') {
-    // Compact indicator for detailed month/quarter/year views
+  } else if (currentView === 'month-detailed' || currentView === 'quarter-detailed') {
+    // Compact indicator for detailed month/quarter views
     return (
       <div
         className="relative rounded-sm px-1 py-0.5 text-xs font-medium text-white shadow-sm mb-0.5 overflow-hidden text-ellipsis whitespace-nowrap group" // Added group
@@ -173,7 +177,7 @@ const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: '
   else { // 'week' view - simple block stacking
     return (
       <div
-        className="relative rounded-md p-1 text-xs font-medium text-white shadow-sm mb-1 group" // Added group
+        className="relative rounded-md p-1 text-xs font-medium text-white shadow-md mb-1 group" // Added group
         style={{
           backgroundColor: resourceColor,
           width: '100%',
@@ -201,7 +205,7 @@ const Event: React.FC<{ event: ShiftEvent; resourceColor: string; currentView: '
  * @component ResourceRow
  * Renders a single resource's row, displaying their name and events.
  */
-const ResourceRow: React.FC<{ resource: Resource; daysInView: Date[]; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void }> = ({ resource, daysInView, currentView, onCellClick }) => {
+const ResourceRow: React.FC<{ resource: Resource; daysInView: Date[]; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent) => void }> = ({ resource, daysInView, currentView, onCellClick }) => {
   const { events } = useCalendar();
 
   const resourceEvents = events.filter(
@@ -218,7 +222,6 @@ const ResourceRow: React.FC<{ resource: Resource; daysInView: Date[]; currentVie
       <div className="w-32 flex-shrink-0 p-3 bg-gray-50 flex items-center justify-center text-sm font-semibold text-gray-800 border-r border-gray-200">
         {resource.name}
       </div>
-      {/* This flex-grow div will contain the horizontally scrolling content */}
       <div className="flex flex-grow">
         {daysInView.map((day) => (
           <div
@@ -230,11 +233,11 @@ const ResourceRow: React.FC<{ resource: Resource; daysInView: Date[]; currentVie
             style={{
               height: '100px', // Fixed height for rows in all detailed views
               minHeight: '100px', // Min height for consistency
-              width: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`, // Fixed width for day/week/month/quarter detailed days
-              minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
+              width: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : '120px', // Fixed width for day/month/quarter detailed days
+              minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : '120px',
               padding: '4px', // Add some padding inside the cell
             }}
-            onClick={(e) => onCellClick(day, e, resource.id)} // Pass the event object and resource.id here
+            onClick={(e) => onCellClick(day, e)} // Pass the event object here
           >
             {currentView === 'day' && dayViewHourlyMarkers.map((minutes) => (
               <div
@@ -261,119 +264,12 @@ const ResourceRow: React.FC<{ resource: Resource; daysInView: Date[]; currentVie
 };
 
 /**
- * @component DailyNotesRow
- * Renders a row for daily notes, spanning across the displayed days/hours.
- */
-const DailyNotesRow: React.FC<{ daysInView: Date[]; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void }> = ({ daysInView, currentView, onCellClick }) => {
-  // Placeholder for daily notes data - you might fetch this from state/context later
-  const dailyNotes: { [key: string]: string } = {
-    [format(new Date(2025, 4, 26), 'yyyy-MM-dd')]: 'Team meeting at 10 AM',
-    [format(new Date(2025, 4, 27), 'yyyy-MM-dd')]: 'Client demo prep',
-  };
-
-  return (
-    <div className="flex border-b border-gray-200 bg-gray-50">
-      <div className="w-32 flex-shrink-0 p-3 text-sm font-semibold text-gray-800 border-r border-gray-200">
-        Daily Notes
-      </div>
-      {currentView === 'day' && (
-        <div className="w-16 flex-shrink-0 p-3 text-center text-sm font-semibold text-gray-600 border-r border-gray-200">
-          {/* Empty cell to align with 24 Hrs header */}
-        </div>
-      )}
-      <div className="flex flex-grow">
-        {daysInView.map((day) => (
-          <div
-            key={`daily-note-${day.toISOString()}`}
-            className={cn(
-              "relative border-r border-gray-200 last:border-r-0 p-2 text-xs text-gray-700 overflow-hidden cursor-pointer",
-              currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for day, flex-none for week/detailed
-            )}
-            style={{
-              height: '50px', // Fixed height for daily notes row
-              minHeight: '50px',
-              width: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`, // Fixed width for day/week/month/quarter detailed days
-              minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-            }}
-            onClick={(e) => onCellClick(day, e)}
-          >
-            {/* Placeholder for daily notes content */}
-            {dailyNotes[format(day, 'yyyy-MM-dd')] || ''}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-/**
- * @component OpenShiftsRow
- * Renders a row for open shifts for a specific group.
- */
-const OpenShiftsRow: React.FC<{ group: ShiftGroup; daysInView: Date[]; currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void }> = ({ group, daysInView, currentView, onCellClick }) => {
-  const { events, resources } = useCalendar();
-  const openShiftResourceId = resources.find(res => res.name === 'Open Shifts')?.id || 'open-shift-resource-id';
-  const openShiftColor = resources.find(res => res.name === 'Open Shifts')?.color || '#9CA3AF'; // Default gray
-
-  const openShiftsForGroupAndDay = (day: Date) => {
-    return events.filter(event =>
-      isSameDay(event.start, day) &&
-      event.resourceId === openShiftResourceId &&
-      event.title.startsWith(`Open Shift for ${group.name}`) // Filter by group name for dummy data
-    );
-  };
-
-  return (
-    <div className="flex border-b border-gray-200 bg-gray-50">
-      <div className="w-32 flex-shrink-0 p-3 text-sm font-semibold text-gray-800 border-r border-gray-200">
-        Open shifts
-      </div>
-      {currentView === 'day' && (
-        <div className="w-16 flex-shrink-0 p-3 text-center text-sm font-semibold text-gray-600 border-r border-gray-200">
-          {/* Empty cell to align with 24 Hrs header */}
-        </div>
-      )}
-      <div className="flex flex-grow">
-        {daysInView.map((day) => (
-          <div
-            key={`open-shift-${group.id}-${day.toISOString()}`}
-            className={cn(
-              "relative border-r border-gray-200 last:border-r-0 p-2 text-xs text-gray-700 overflow-hidden cursor-pointer",
-              currentView === 'day' ? 'flex-none' : 'flex-none'
-            )}
-            style={{
-              height: '50px', // Fixed height for open shifts row
-              minHeight: '50px',
-              width: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-              minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-            }}
-            onClick={(e) => onCellClick(day, e, openShiftResourceId, group.name)} // Pass openShiftResourceId AND group.name
-          >
-            {/* Display open shifts for this day and group */}
-            {openShiftsForGroupAndDay(day).map(shift => (
-              <div
-                key={shift.id}
-                className="rounded-sm px-1 py-0.5 text-xs font-medium text-white shadow-sm mb-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ backgroundColor: openShiftColor }}
-                title={`${shift.title} (${formatTime(shift.start)} - ${formatTime(shift.end)})`}
-              >
-                {shift.title}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-/**
  * @component ShiftForm
  * A form component to add new shift events.
  */
-const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: Date | null; popupX: number | null; popupY: number | null; defaultResourceId?: string; groupNameForOpenShift?: string }> = ({ isOpen, onClose, initialDate, popupX, popupY, defaultResourceId, groupNameForOpenShift }) => {
+const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: Date | null; popupX: number | null; popupY: number | null }> = ({ isOpen, onClose, initialDate, popupX, popupY }) => {
   const { resources, addEvent } = useCalendar();
-  const [resourceId, setResourceId] = useState<string>(defaultResourceId || resources[0]?.id || '');
+  const [resourceId, setResourceId] = useState<string>(resources[0]?.id || '');
   const [title, setTitle] = useState<string>('');
   const [startDate, setStartDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [startTime, setStartTime] = useState<string>('09:00');
@@ -385,7 +281,7 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
 
   useEffect(() => {
     if (isOpen) {
-      setResourceId(defaultResourceId || resources[0]?.id || ''); // Set default resource on open
+      setResourceId(resources[0]?.id || '');
       setTitle('');
       const dateToUse = initialDate || new Date(); // Use initialDate if provided, else current date
       setStartDate(format(dateToUse, 'yyyy-MM-dd'));
@@ -394,7 +290,7 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
       setEndTime('17:00'); // Default end time
       setErrorMessage('');
     }
-  }, [isOpen, resources, initialDate, defaultResourceId]); // Add defaultResourceId to dependencies
+  }, [isOpen, resources, initialDate]); // Add initialDate to dependencies
 
   useEffect(() => {
     if (isOpen && modalRef.current && popupX !== null && popupY !== null) {
@@ -431,7 +327,7 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
     }
   }, [isOpen, popupX, popupY]); // Re-run when these change
 
-  const handleSubmit = (e: React.FormEvent) => { // Removed async
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -440,27 +336,25 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
 
     if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
       setErrorMessage('Invalid date or time format.');
-      return;
+      
+return;
     }
 
     if (endDateTime <= startDateTime) {
       setErrorMessage('End time must be after start time.');
-      return;
+      
+return;
     }
 
     if (!resourceId || !title.trim()) {
       setErrorMessage('Please select a resource and enter a title.');
-      return;
+      
+return;
     }
 
-    let finalTitle = title.trim();
-    if (resourceId === 'open-shift-resource-id' && groupNameForOpenShift) {
-      finalTitle = `Open Shift for ${groupNameForOpenShift}: ${finalTitle}`;
-    }
-
-    addEvent({
+    await addEvent({
       resourceId,
-      title: finalTitle, // Use the potentially modified title
+      title: title.trim(),
       start: startDateTime,
       end: endDateTime,
     });
@@ -490,7 +384,6 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
               value={resourceId}
               onChange={(e) => setResourceId(e.target.value)}
               required
-              disabled={defaultResourceId === 'open-shift-resource-id'} // Disable if it's an open shift
             >
               {resources.map((res) => (
                 <option key={res.id} value={res.id}>
@@ -599,7 +492,7 @@ const ShiftForm: React.FC<{ isOpen: boolean; onClose: () => void; initialDate: D
  * including date headers and grouped resource rows with their respective events.
  * Renamed from Calendar to avoid naming conflict with the date picker Calendar component.
  */
-const MainCalendar: React.FC<{ currentWeekStart: Date; currentView: 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void }> = ({ currentWeekStart, currentView, onCellClick }) => {
+const MainCalendar: React.FC<{ currentWeekStart: Date; currentView: 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed'; onCellClick: (date: Date, event: React.MouseEvent) => void }> = ({ currentWeekStart, currentView, onCellClick }) => {
   const { shiftGroups, resources, toggleGroupExpansion, events } = useCalendar(); // Destructure events here
 
   // Determine which days/columns to display based on the current view
@@ -642,7 +535,8 @@ const MainCalendar: React.FC<{ currentWeekStart: Date; currentView: 'week' | 'da
   // Render different layouts based on currentView
   if (currentView === 'year') {
     const months = Array.from({ length: 12 }).map((_, i) => new Date(currentWeekStart.getFullYear(), i, 1));
-    return (
+    
+return (
       <div className="flex flex-col border border-gray-300 rounded-lg shadow-md overflow-hidden bg-white p-4">
         <h2 className="text-2xl font-bold text-center mb-4">{currentWeekStart.getFullYear()} Year View</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -731,130 +625,87 @@ const MainCalendar: React.FC<{ currentWeekStart: Date; currentView: 'week' | 'da
             24 Hrs
           </div>
         )}
-        {/* Scrollable Header Content */}
-        <div className="flex flex-grow overflow-x-auto" id="scroll-header"> {/* Added id for synchronization */}
-          <div className="flex" style={{ minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${columnsToDisplay.length * DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px` }}>
-            {currentView === 'day' ? (
-              headerColumns.map((col) => (
-                <div
-                  key={col.key}
-                  className="flex-none p-3 text-center text-xs font-semibold text-gray-600 border-r border-gray-200"
-                  style={{ width: `${DAY_VIEW_HOUR_WIDTH_PX}px` }} // Fixed width for each hour column
-                >
-                  {col.label}
-                </div>
-              ))
-            ) : (
-              (columnsToDisplay as Date[]).map((day) => (
-                <div
-                  key={day.toISOString()}
-                  className="flex-none p-3 text-center text-sm font-semibold text-gray-600 border-r border-gray-200"
-                  style={{ minWidth: `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px` }} // Use minWidth for responsiveness
-                >
-                  {formatDateHeader(day)}
-                </div>
-              ))
-            )}
+        {/* Render hours for 'day' view, or dates for 'week'/'month-detailed'/'quarter-detailed' view */}
+        {currentView === 'day' ? (
+          <div className="flex flex-grow" style={{ minWidth: `${DAY_VIEW_TOTAL_WIDTH_PX}px` }}>
+            {headerColumns.map((col) => (
+              <div
+                key={col.key}
+                className="flex-none p-3 text-center text-xs font-semibold text-gray-600 border-r border-gray-200"
+                style={{ width: `${DAY_VIEW_HOUR_WIDTH_PX}px` }} // Fixed width for each hour column
+              >
+                {col.label}
+              </div>
+            ))}
           </div>
-        </div>
+        ) : (
+          (columnsToDisplay as Date[]).map((day) => (
+            <div
+              key={day.toISOString()}
+              className="flex-1 p-3 text-center text-sm font-semibold text-gray-600 border-r border-gray-200"
+            >
+              {formatDateHeader(day)}
+            </div>
+          ))
+        )}
       </div>
-
-      {/* Daily Notes Row */}
-      {(currentView === 'day' || currentView === 'week' || currentView === 'month-detailed' || currentView === 'quarter-detailed') && (
-        <div className="flex border-b border-gray-200 bg-gray-50">
-          <div className="w-32 flex-shrink-0 p-3 text-sm font-semibold text-gray-800 border-r border-gray-200">
-            Daily Notes
-          </div>
-          {currentView === 'day' && (
-            <div className="w-16 flex-shrink-0 p-3 text-center text-sm font-semibold text-gray-600 border-r border-gray-200">
-              {/* Empty cell to align with 24 Hrs header */}
-            </div>
-          )}
-          <div className="flex flex-grow overflow-x-auto" id="scroll-daily-notes"> {/* Added id for synchronization */}
-            <div className="flex" style={{ minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${columnsToDisplay.length * DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px` }}>
-              {(columnsToDisplay as Date[]).map((day) => (
-                <div
-                  key={`daily-note-${day.toISOString()}`}
-                  className={cn(
-                    "relative border-r border-gray-200 last:border-r-0 p-2 text-xs text-gray-700 overflow-hidden cursor-pointer",
-                    currentView === 'day' ? 'flex-none' : 'flex-none'
-                  )}
-                  style={{
-                    height: '50px', // Fixed height for daily notes row
-                    minHeight: '50px',
-                    width: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`, // Fixed width for day/week/month/quarter detailed days
-                    minWidth: currentView === 'day' ? `${DAY_VIEW_TOTAL_WIDTH_PX}px` : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-                  }}
-                  onClick={(e) => onCellClick(day, e)}
-                >
-                  {/* Placeholder for daily notes content */}
-                  {format(day, 'MMM d') === format(new Date(2025, 4, 26), 'MMM d') && 'Team meeting'}
-                  {format(day, 'MMM d') === format(new Date(2025, 4, 27), 'MMM d') && 'Client prep'}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Calendar Body: Shift Groups and Resource Rows */}
       <div className="flex-grow overflow-y-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>
-        {shiftGroups.map((group) => (
-          <div key={group.id} className="mb-2 last:mb-0">
-            {/* Group Header Row */}
-            <div
-              className="flex bg-gray-200 border-b border-t border-gray-300 cursor-pointer hover:bg-gray-300 transition duration-150 ease-in-out"
-              onClick={() => toggleGroupExpansion(group.id)}
-            >
-              <div className="w-32 flex-shrink-0 p-3 text-sm font-bold text-gray-900 border-r border-gray-300 flex items-center justify-between">
-                <span>{group.name}</span>
-                {/* Arrow icon for expand/collapse */}
-                <svg
-                  className={`w-4 h-4 text-gray-700 transform transition-transform duration-200 ${
-                    group.isExpanded ? 'rotate-90' : ''
-                  }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
+        <div className="flex">
+          {/* Main Calendar Content Area */}
+          <div className="flex-grow overflow-x-auto"> {/* This will handle horizontal scrolling for day/week views */}
+            {shiftGroups.map((group) => (
+              <div key={group.id} className="mb-2 last:mb-0">
+                {/* Group Header Row */}
+                <div
+                  className="flex bg-gray-200 border-b border-t border-gray-300 cursor-pointer hover:bg-gray-300 transition duration-150 ease-in-out"
+                  onClick={() => toggleGroupExpansion(group.id)}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
-                </svg>
-              </div>
-              {/* Conditional empty cell for '24 Hrs' column in Day view */}
-              {currentView === 'day' && (
-                <div className="w-16 flex-shrink-0 border-r border-gray-300"></div>
-              )}
-              <div className="flex-grow p-3 text-sm font-semibold text-gray-600">
-                {/* Empty cell for group header spanning days/hours */}
-              </div>
-            </div>
-
-            {/* Open Shifts Row for each group */}
-            {group.isExpanded && (
-              <OpenShiftsRow group={group} daysInView={currentView === 'day' ? [currentWeekStart] : (columnsToDisplay as Date[])} currentView={currentView} onCellClick={onCellClick} />
-            )}
-
-            {/* Resources belonging to this group - conditionally rendered */}
-            {group.isExpanded && (
-              <div className="transition-all duration-300 ease-in-out overflow-hidden">
-                <div className="flex overflow-x-auto" id={`scroll-group-${group.id}`}> {/* Added id for synchronization */}
-                  {resources
-                    .filter((res) => res.groupId === group.id)
-                    .map((resource) => (
-                      <ResourceRow
-                        key={resource.id}
-                        resource={resource}
-                        daysInView={currentView === 'day' ? [currentWeekStart] : (columnsToDisplay as Date[])}
-                        currentView={currentView}
-                        onCellClick={onCellClick} // Pass the click handler
-                      />
-                    ))}
+                  <div className="w-32 flex-shrink-0 p-3 text-sm font-bold text-gray-900 border-r border-gray-300 flex items-center justify-between">
+                    <span>{group.name}</span>
+                    {/* Arrow icon for expand/collapse */}
+                    <svg
+                      className={`w-4 h-4 text-gray-700 transform transition-transform duration-200 ${
+                        group.isExpanded ? 'rotate-90' : ''
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                  </div>
+                  {/* Conditional empty cell for '24 Hrs' column in Day view */}
+                  {currentView === 'day' && (
+                    <div className="w-16 flex-shrink-0 border-r border-gray-300"></div>
+                  )}
+                  <div className="flex-grow p-3 text-sm font-semibold text-gray-600">
+                    {/* Empty cell for group header spanning days/hours */}
+                  </div>
                 </div>
+
+                {/* Resources belonging to this group - conditionally rendered */}
+                {group.isExpanded && (
+                  <div className="transition-all duration-300 ease-in-out overflow-hidden">
+                    {resources
+                      .filter((res) => res.groupId === group.id)
+                      .map((resource) => (
+                        <ResourceRow
+                          key={resource.id}
+                          resource={resource}
+                          daysInView={currentView === 'day' ? [currentWeekStart] : (columnsToDisplay as Date[])}
+                          currentView={currentView}
+                          onCellClick={onCellClick} // Pass the click handler
+                        />
+                      ))}
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
@@ -875,14 +726,12 @@ const App: React.FC = () => {
     { id: 'group-support', name: 'Customer Support', isExpanded: true },
   ]);
 
-  // Add a dummy resource for "Open Shifts"
   const [resources, setResources] = useState<Resource[]>([
     { id: 'res-1', name: 'Alice Johnson', color: '#EF4444', groupId: 'group-ops' },
     { id: 'res-2', name: 'Bob Williams', color: '#3B82F6', groupId: 'group-ops' },
     { id: 'res-3', name: 'Charlie Brown', color: '#10B981', groupId: 'group-sales' },
     { id: 'res-4', name: 'Diana Prince', color: '#F59E0B', groupId: 'group-sales' },
     { id: 'res-5', name: 'Eve Davis', color: '#6366F1', groupId: 'group-support' },
-    { id: 'open-shift-resource-id', name: 'Open Shifts', color: '#9CA3AF', groupId: 'N/A' }, // Special resource for open shifts
   ]);
 
   const [events, setEvents] = useState<ShiftEvent[]>([
@@ -921,21 +770,6 @@ const App: React.FC = () => {
       start: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 10, 0, 0), // Yesterday
       end: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 18, 0, 0),
     },
-    // Dummy open shifts
-    {
-      id: 'open-evt-1',
-      resourceId: 'open-shift-resource-id',
-      title: 'Open Shift for Operations Team',
-      start: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 7, 0, 0),
-      end: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 11, 0, 0),
-    },
-    {
-      id: 'open-evt-2',
-      resourceId: 'open-shift-resource-id',
-      title: 'Open Shift for Sales Department',
-      start: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 16, 0, 0),
-      end: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 20, 0, 0),
-    },
   ]);
 
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(today); // Initialize with deterministic date
@@ -946,15 +780,223 @@ const App: React.FC = () => {
   // State to hold the date for the new event form and popup coordinates
   const [newEventFormDate, setNewEventFormDate] = useState<Date | null>(null);
   const [popupCoords, setPopupCoords] = useState<{ x: number; y: number } | null>(null);
-  const [defaultResourceIdForForm, setDefaultResourceIdForForm] = useState<string | undefined>(undefined);
-  const [groupNameForOpenShift, setGroupNameForOpenShift] = useState<string | undefined>(undefined);
+
+  // Firebase state
+  const [db, setDb] = useState<any>(null);
+  const [auth, setAuth] = useState<any>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Initialize Firebase and set up auth listener
+  useEffect(() => {
+    const initializeFirebase = async () => {
+      try {
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const firestore = getFirestore(app);
+        const firebaseAuth = getAuth(app);
+
+        setDb(firestore);
+        setAuth(firebaseAuth);
+
+        // Sign in anonymously or with custom token
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(firebaseAuth, __initial_auth_token);
+        } else {
+          await signInAnonymously(firebaseAuth);
+        }
+
+        onAuthStateChanged(firebaseAuth, (user) => {
+          if (user) {
+            setUserId(user.uid);
+            setIsLoading(false);
+          } else {
+            setUserId(null);
+            setIsLoading(false);
+          }
+        });
+      } catch (err: any) {
+        console.error("Firebase initialization error:", err);
+        setError(`Failed to initialize Firebase: ${err.message}`);
+        setIsLoading(false);
+      }
+    };
+
+    initializeFirebase();
+  }, []); // Run only once on component mount
+
+  // Fetch data from Firestore in real-time
+  useEffect(() => {
+    if (!db || !userId) return;
+
+    const fetchShiftGroups = () => {
+      const q = query(collection(db, `artifacts/${__app_id}/users/${userId}/shiftGroups`));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const groups: ShiftGroup[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as Omit<ShiftGroup, 'id'>
+        }));
+        setShiftGroups(groups);
+      }, (err) => {
+        console.error("Error fetching shift groups:", err);
+        setError(`Failed to fetch groups: ${err.message}`);
+      });
+      
+return unsubscribe;
+    };
+
+    const fetchResources = () => {
+      const q = query(collection(db, `artifacts/${__app_id}/users/${userId}/resources`));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const resourcesData: Resource[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as Omit<Resource, 'id'>
+        }));
+        setResources(resourcesData);
+      }, (err) => {
+        console.error("Error fetching resources:", err);
+        setError(`Failed to fetch resources: ${err.message}`);
+      });
+      
+return unsubscribe;
+    };
+
+    const fetchEvents = () => {
+      const q = query(collection(db, `artifacts/${__app_id}/users/${userId}/events`));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const eventsData: ShiftEvent[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          title: doc.data().title,
+          resourceId: doc.data().resourceId,
+          start: doc.data().start.toDate(), // Convert Firestore Timestamp to Date
+          end: doc.data().end.toDate(),     // Convert Firestore Timestamp to Date
+        }));
+        setEvents(eventsData);
+      }, (err) => {
+        console.error("Error fetching events:", err);
+        setError(`Failed to fetch events: ${err.message}`);
+      });
+      
+return unsubscribe;
+    };
+
+    // Run initial data population if collections are empty (first run)
+    const populateInitialData = async () => {
+      const groupsCollection = collection(db, `artifacts/${__app_id}/users/${userId}/shiftGroups`);
+      const groupsSnapshot = await getDocs(groupsCollection);
+      if (groupsSnapshot.empty) {
+        console.log("Populating initial data...");
+        const batch = writeBatch(db);
+
+        const group1Ref = doc(groupsCollection, 'group-ops');
+        batch.set(group1Ref, { name: 'Operations Team', isExpanded: true });
+        const group2Ref = doc(groupsCollection, 'group-sales');
+        batch.set(group2Ref, { name: 'Sales Department', isExpanded: true });
+        const group3Ref = doc(groupsCollection, 'group-support');
+        batch.set(group3Ref, { name: 'Customer Support', isExpanded: true });
+
+        const resourcesCollection = collection(db, `artifacts/${__app_id}/users/${userId}/resources`);
+        batch.set(doc(resourcesCollection, 'res-1'), { name: 'Alice Johnson', color: '#EF4444', groupId: 'group-ops' });
+        batch.set(doc(resourcesCollection, 'res-2'), { name: 'Bob Williams', color: '#3B82F6', groupId: 'group-ops' });
+        batch.set(doc(resourcesCollection, 'res-3'), { name: 'Charlie Brown', color: '#10B981', groupId: 'group-sales' });
+        batch.set(doc(resourcesCollection, 'res-4'), { name: 'Diana Prince', color: '#F59E0B', groupId: 'group-sales' });
+        batch.set(doc(resourcesCollection, 'res-5'), { name: 'Eve Davis', color: '#6366F1', groupId: 'group-support' });
+
+        const eventsCollection = collection(db, `artifacts/${__app_id}/users/${userId}/events`);
+        const todayForInit = new Date(2025, 4, 26, 0, 0, 0); // May 26, 2025, 00:00:00
+        batch.set(doc(eventsCollection, 'evt-1'), { resourceId: 'res-1', title: 'Morning Shift', start: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate(), 9, 0, 0), end: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate(), 13, 0, 0) });
+        batch.set(doc(eventsCollection, 'evt-2'), { resourceId: 'res-2', title: 'Afternoon Shift', start: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate(), 13, 0, 0), end: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate(), 17, 0, 0) });
+        batch.set(doc(eventsCollection, 'evt-3'), { resourceId: 'res-1', title: 'Team Meeting', start: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() + 1, 9, 0, 0), end: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() + 1, 11, 0, 0) });
+        batch.set(doc(eventsCollection, 'evt-4'), { resourceId: 'res-3', title: 'Client Call', start: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() + 2, 10, 0, 0), end: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() + 2, 12, 0, 0) });
+        batch.set(doc(eventsCollection, 'evt-5'), { resourceId: 'res-5', title: 'Support Desk', start: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() - 1, 10, 0, 0), end: new Date(todayForInit.getFullYear(), todayForInit.getMonth(), todayForInit.getDate() - 1, 18, 0, 0) });
+
+        await batch.commit();
+        console.log("Initial data populated.");
+      }
+    };
+
+    populateInitialData(); // Call this to ensure data exists
+
+    const unsubscribeGroups = fetchShiftGroups();
+    const unsubscribeResources = fetchResources();
+    const unsubscribeEvents = fetchEvents();
+
+    return () => {
+      unsubscribeGroups();
+      unsubscribeResources();
+      unsubscribeEvents();
+    };
+  }, [db, userId]); // Re-run when db or userId changes
+
+  // Function to add event to Firestore
+  const addEvent = async (newEvent: Omit<ShiftEvent, 'id'>) => {
+    if (!db || !userId) {
+      setError("Database not ready or user not authenticated.");
+      
+return;
+    }
+    try {
+      await addDoc(collection(db, `artifacts/${__app_id}/users/${userId}/events`), {
+        ...newEvent,
+        start: newEvent.start, // Firestore handles Date objects
+        end: newEvent.end,
+      });
+    } catch (e: any) {
+      console.error("Error adding document: ", e);
+      setError(`Failed to add event: ${e.message}`);
+    }
+  };
+
+  // Function to delete event from Firestore
+  const deleteEvent = async (eventId: string) => {
+    if (!db || !userId) {
+      setError("Database not ready or user not authenticated.");
+      
+return;
+    }
+    try {
+      await deleteDoc(doc(db, `artifacts/${__app_id}/users/${userId}/events`, eventId));
+    } catch (e: any) {
+      console.error("Error deleting document: ", e);
+      setError(`Failed to delete event: ${e.message}`);
+    }
+  };
+
+  // Function to toggle group expansion in Firestore
+  const toggleGroupExpansion = async (groupId: string) => {
+    if (!db || !userId) {
+      setError("Database not ready or user not authenticated.");
+      
+return;
+    }
+    const groupRef = doc(db, `artifacts/${__app_id}/users/${userId}/shiftGroups`, groupId);
+    const currentGroup = shiftGroups.find(g => g.id === groupId);
+    if (currentGroup) {
+      try {
+        await updateDoc(groupRef, {
+          isExpanded: !currentGroup.isExpanded,
+        });
+      } catch (e: any) {
+        console.error("Error updating group expansion: ", e);
+        setError(`Failed to update group: ${e.message}`);
+      }
+    }
+  };
+
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(new Date(2025, 4, 26, 0, 0, 0)); // Initialize with deterministic date
+  const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed'>('week');
+
+  // State to hold the date for the new event form and popup coordinates
+  const [newEventFormDate, setNewEventFormDate] = useState<Date | null>(null);
+  const [popupCoords, setPopupCoords] = useState<{ x: number; y: number } | null>(null);
 
 
   // Function to open the add shift form, optionally with an initial date and click event
-  const openAddShiftForm = (date: Date | null = null, event?: React.MouseEvent, resourceId?: string, groupName?: string) => {
+  const openAddShiftForm = (date: Date | null = null, event?: React.MouseEvent) => {
     setNewEventFormDate(date);
-    setDefaultResourceIdForForm(resourceId); // Set the resource ID for the form
-    setGroupNameForOpenShift(groupName); // Set the group name for open shifts
     if (event) {
       setPopupCoords({ x: event.clientX, y: event.clientY });
     } else {
@@ -971,32 +1013,6 @@ const App: React.FC = () => {
     }
   };
 
-  const addEvent = (newEvent: Omit<ShiftEvent, 'id'>) => { // Removed async
-    setEvents((prevEvents) => [
-      ...prevEvents,
-      { ...newEvent, id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` },
-    ]);
-  };
-
-  /**
-   * @function toggleGroupExpansion
-   * Toggles the `isExpanded` state for a specific shift group.
-   * @param {string} groupId - The ID of the group to toggle.
-   */
-  const toggleGroupExpansion = (groupId: string) => { // Removed async
-    setShiftGroups((prevGroups) =>
-      prevGroups.map((group) =>
-        group.id === groupId ? { ...group, isExpanded: !group.isExpanded } : group
-      )
-    );
-  };
-
-  // Function to delete event from local state
-  const deleteEvent = (eventId: string) => { // Removed async
-    setEvents((prevEvents) => prevEvents.filter(event => event.id !== eventId));
-  };
-
-
   // Generic navigation for previous/next based on current view
   const goToPrevious = () => {
     setCurrentWeekStart((prev) => {
@@ -1012,7 +1028,8 @@ const App: React.FC = () => {
       } else if (currentView === 'quarter' || currentView === 'quarter-detailed') {
         newDate = subQuarters(newDate, 1);
       }
-      return newDate;
+      
+return newDate;
     });
   };
 
@@ -1030,7 +1047,8 @@ const App: React.FC = () => {
       } else if (currentView === 'quarter' || currentView === 'quarter-detailed') {
         newDate = addQuarters(newDate, 1);
       }
-      return newDate;
+      
+return newDate;
     });
   };
 
@@ -1041,11 +1059,28 @@ const App: React.FC = () => {
     events,
     addEvent,
     toggleGroupExpansion,
-    deleteEvent,
-    // Removed userId, isLoading
+    deleteEvent, // Provide deleteEvent
+    userId,
+    isLoading,
   };
 
-  // Removed isLoading and error display logic
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 text-gray-700">
+        Loading application data...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-red-50 text-red-800 p-4">
+        <p className="font-bold text-lg">Error:</p>
+        <p>{error}</p>
+        <p className="mt-4 text-sm">Please ensure Firebase is correctly configured and accessible.</p>
+      </div>
+    );
+  }
 
   return (
     <CalendarContext.Provider value={calendarContextValue}>
@@ -1056,31 +1091,19 @@ const App: React.FC = () => {
           body {
             font-family: 'Inter', sans-serif;
           }
-          /* Custom scrollbar for better visibility */
-          ::-webkit-scrollbar {
-            height: 8px;
-            width: 8px;
-          }
-          ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 10px;
-          }
-          ::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 10px;
-          }
-          ::-webkit-scrollbar-thumb:hover {
-            background: #555;
-          }
           `}
         </style>
         <script src="https://cdn.tailwindcss.com"></script>
 
         <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">
-            Microsoft Shifts Clone (Dummy Data Only)
+            Microsoft Shifts Clone (Firebase Enabled)
           </h1>
-          {/* Removed userId display */}
+          {userId && (
+            <p className="text-sm text-gray-600 text-center mb-4">
+              Logged in as User ID: <span className="font-mono bg-gray-200 px-2 py-1 rounded">{userId}</span>
+            </p>
+          )}
 
           <div className="flex justify-between items-center mb-6">
             <div className="flex space-x-2">
@@ -1136,12 +1159,6 @@ const App: React.FC = () => {
               >
                 Year
               </Button>
-              <Button
-                variant={currentView === 'year-detailed' ? 'default' : 'outline'}
-                onClick={() => setCurrentView('year-detailed')}
-              >
-                Year (Detailed)
-              </Button>
             </div>
 
             {/* Date Picker using shadcn/ui components */}
@@ -1191,7 +1208,7 @@ const App: React.FC = () => {
           <MainCalendar currentWeekStart={currentWeekStart} currentView={currentView} onCellClick={openAddShiftForm} />
         </div>
 
-        <ShiftForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} initialDate={newEventFormDate} popupX={popupCoords?.x || null} popupY={popupCoords?.y || null} defaultResourceId={defaultResourceIdForForm} groupNameForOpenShift={groupNameForOpenShift} />
+        <ShiftForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} initialDate={newEventFormDate} popupX={popupCoords?.x || null} popupY={popupCoords?.y || null} />
       </div>
     </CalendarContext.Provider>
   );
