@@ -166,7 +166,7 @@ const MainCalendar: React.FC<{
     return (
         <div className='flex flex-col  rounded-lg border border-gray-300 bg-white shadow-md'>
             {/* Calendar Header: Groups/Resources, and Days/Hours */}
-            <div className='flex border-b border-gray-200 bg-gray-100'>
+            <div className='w-full flex border-b border-gray-200 bg-gray-100'>
                 <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'>
                     Groups/Resources
                 </div>
