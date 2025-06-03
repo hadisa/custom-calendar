@@ -44,6 +44,7 @@ export interface ShiftEvent {
     title: string;
     start: Date;
     end: Date;
+    color?: string; // Optional color property for custom event colors
 }
 
 /**

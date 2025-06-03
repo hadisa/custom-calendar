@@ -1,3 +1,4 @@
+
 "use client"
 import { format, parseISO } from "date-fns";
 
@@ -5,7 +6,6 @@ import { useState, useRef, useEffect } from "react";
 
 import { useCalendar } from "./context";
 import { Button } from "@/registry/new-york-v4/ui/button";
-import { Resource } from "./type";
 
 /**
  * @component ShiftForm
@@ -28,33 +28,21 @@ const ShiftForm: React.FC<{
     const [endDate, setEndDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
     const [endTime, setEndTime] = useState<string>('17:00');
     const [errorMessage, setErrorMessage] = useState<string>('');
-    const [color, setColor] = useState<string>('#4CAF50'); // Default color
 
     const modalRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (isOpen) {
-            setResourceId(defaultResourceId || resources[0]?.id || '');
+            setResourceId(defaultResourceId || resources[0]?.id || ''); // Set default resource on open
             setTitle('');
-            const dateToUse = initialDate || new Date();
+            const dateToUse = initialDate || new Date(); // Use initialDate if provided, else current date
             setStartDate(format(dateToUse, 'yyyy-MM-dd'));
-            setStartTime('09:00');
+            setStartTime('09:00'); // Default start time
             setEndDate(format(dateToUse, 'yyyy-MM-dd'));
-            setEndTime('17:00');
+            setEndTime('17:00'); // Default end time
             setErrorMessage('');
-            // Set default color based on selected resource
-            const selectedResource = resources.find((r: Resource) => r.id === (defaultResourceId || resources[0]?.id));
-            setColor(selectedResource?.color || '#4CAF50');
         }
-    }, [isOpen, resources, initialDate, defaultResourceId]);
-
-    // Update color when resource changes
-    useEffect(() => {
-        const selectedResource = resources.find((r: Resource) => r.id === resourceId);
-        if (selectedResource?.color) {
-            setColor(selectedResource.color);
-        }
-    }, [resourceId, resources]);
+    }, [isOpen, resources, initialDate, defaultResourceId]); // Add defaultResourceId to dependencies
 
     useEffect(() => {
         if (isOpen && modalRef.current && popupX !== null && popupY !== null) {
@@ -94,6 +82,7 @@ const ShiftForm: React.FC<{
     }, [isOpen, popupX, popupY]); // Re-run when these change
 
     const handleSubmit = (e: React.FormEvent) => {
+        // Removed async
         e.preventDefault();
         setErrorMessage('');
 
@@ -102,16 +91,19 @@ const ShiftForm: React.FC<{
 
         if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
             setErrorMessage('Invalid date or time format.');
+
             return;
         }
 
         if (endDateTime <= startDateTime) {
             setErrorMessage('End time must be after start time.');
+
             return;
         }
 
         if (!resourceId || !title.trim()) {
             setErrorMessage('Please select a resource and enter a title.');
+
             return;
         }
 
@@ -122,10 +114,9 @@ const ShiftForm: React.FC<{
 
         addEvent({
             resourceId,
-            title: finalTitle,
+            title: finalTitle, // Use the potentially modified title
             start: startDateTime,
-            end: endDateTime,
-            color: color // Include the selected color
+            end: endDateTime
         });
         onClose();
     };
@@ -161,9 +152,9 @@ const ShiftForm: React.FC<{
                             required
                             disabled={defaultResourceId === 'open-shift-resource-id'} // Disable if it's an open shift
                         >
-                            {resources.map((res: Resource) => (
+                            {resources.map((res) => (
                                 <option key={res.id} value={res.id}>
-                                    {res.name} (Group: {resources.find((r: Resource) => r.id === res.id)?.groupId || 'N/A'}){' '}
+                                    {res.name} (Group: {resources.find((r) => r.id === res.id)?.groupId || 'N/A'}){' '}
                                     {/* Show group name for context */}
                                 </option>
                             ))}
@@ -183,22 +174,6 @@ const ShiftForm: React.FC<{
                             placeholder='e.g., Morning Shift, Meeting'
                             required
                         />
-                    </div>
-
-                    <div className='mb-4'>
-                        <label htmlFor='color' className='mb-2 block text-sm font-semibold text-gray-700'>
-                            Event Color:
-                        </label>
-                        <div className='flex items-center gap-2'>
-                            <input
-                                type='color'
-                                id='color'
-                                className='h-10 w-20 cursor-pointer rounded border border-gray-300'
-                                value={color}
-                                onChange={(e) => setColor(e.target.value)}
-                            />
-                            <span className='text-sm text-gray-600'>{color}</span>
-                        </div>
                     </div>
 
                     <div className='mb-4 grid grid-cols-2 gap-4'>

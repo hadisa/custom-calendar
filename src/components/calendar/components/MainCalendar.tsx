@@ -1,14 +1,29 @@
-"use client"
+'use client';
 
-import { addDays, addMonths, endOfMonth, endOfQuarter, endOfWeek, format, getMonth, getQuarter, getYear, isSameDay, isSameMonth, startOfMonth, startOfQuarter, startOfWeek } from "date-fns";
-import { formatDateHeader, getDaysInWeek } from "./lib";
+import { cn } from '@/lib/utils';
 
-
-import { useCalendar } from "./context";
-import { cn } from "@/lib/utils";
-import OpenShiftsRow from "./OpenShiftsRow";
-import ResourceRow from "./ResourceRow";
-import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, DAY_VIEW_HOUR_WIDTH_PX } from "./type";
+import OpenShiftsRow from './OpenShiftsRow';
+import ResourceRow from './ResourceRow';
+import { useCalendar } from './context';
+import { formatDateHeader, getDaysInWeek } from './lib';
+import { DAY_VIEW_HOUR_WIDTH_PX, DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, ShiftEvent, ShiftGroup, Resource } from './type';
+import {
+    addDays,
+    addMonths,
+    endOfMonth,
+    endOfQuarter,
+    endOfWeek,
+    format,
+    getMonth,
+    getQuarter,
+    getYear,
+    isSameDay,
+    isSameMonth,
+    startOfMonth,
+    startOfQuarter,
+    startOfWeek
+} from 'date-fns';
+import TimeDisplay from './TimeDisplay';
 
 /**
  * @component MainCalendar
@@ -21,25 +36,25 @@ const MainCalendar: React.FC<{
     currentView: 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed';
     onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void;
 }> = ({ currentWeekStart, currentView, onCellClick }) => {
-    const { shiftGroups, resources, toggleGroupExpansion, events } = useCalendar(); // Destructure events here
+    const { shiftGroups, resources, toggleGroupExpansion, events } = useCalendar();
 
     // Determine which days/columns to display based on the current view
     let columnsToDisplay: Date[] = [];
-    let headerColumns: { label: string; key: string }[] = []; // For day view hours
+    let headerColumns: { label: string; key: string }[] = [];
 
     if (currentView === 'week') {
         columnsToDisplay = getDaysInWeek(currentWeekStart);
     } else if (currentView === 'day') {
-        columnsToDisplay = [currentWeekStart]; // Single day for the column
+        columnsToDisplay = [currentWeekStart];
         headerColumns = Array.from({ length: 24 }).map((_, i) => ({
-            label: format(new Date(2000, 0, 1, i), 'ha').toLowerCase(), // e.g., 12am, 1am
+            label: format(new Date(2000, 0, 1, i), 'ha').toLowerCase(),
             key: `hour-header-${i}`
         }));
     } else if (currentView === 'month' || currentView === 'month-detailed') {
         const startOfCurrentMonth = startOfMonth(currentWeekStart);
         const endOfCurrentMonth = endOfMonth(currentWeekStart);
-        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 }); // Start from Sunday of the first week
-        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 }); // End on Saturday of the last week
+        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 });
+        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 });
 
         let currentDay = startDay;
         while (currentDay <= endDay) {
@@ -65,6 +80,7 @@ const MainCalendar: React.FC<{
 
         return (
             <div className='flex flex-col rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+                <TimeDisplay />
                 <h2 className='mb-4 text-center text-2xl font-bold'>{currentWeekStart.getFullYear()} Year View</h2>
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'>
                     {months.map((monthDate) => (
@@ -73,13 +89,7 @@ const MainCalendar: React.FC<{
                             {/* Placeholder for month summary - can be expanded later */}
                             <p className='text-sm text-gray-600'>
                                 Events:{' '}
-                                {
-                                    events.filter(
-                                        (e) =>
-                                            getMonth(e.start) === getMonth(monthDate) &&
-                                            getYear(e.start) === getYear(monthDate)
-                                    ).length
-                                }
+                                {events.filter((e: ShiftEvent) => getMonth(e.start) === getMonth(monthDate) && getYear(e.start) === getYear(monthDate)).length}
                             </p>
                         </div>
                     ))}
@@ -94,7 +104,8 @@ const MainCalendar: React.FC<{
         const monthsInQuarter = Array.from({ length: 3 }).map((_, i) => addMonths(startOfCurrentQuarter, i));
 
         return (
-            <div className='flex flex-col  rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+            <div className='flex flex-col rounded-lg border border-gray-300 p-4 shadow-md' style={{ backgroundColor: 'var(--quarter-month-shift)' }}>
+                <TimeDisplay />
                 <h2 className='mb-4 text-center text-2xl font-bold'>
                     {format(startOfCurrentQuarter, 'MMM d')} - {format(endOfCurrentQuarter, 'MMM d,yyyy')} Quarter View
                 </h2>
@@ -104,13 +115,7 @@ const MainCalendar: React.FC<{
                             <h3 className='mb-2 text-lg font-semibold'>{format(monthDate, 'MMMM')}</h3>
                             <p className='text-sm text-gray-600'>
                                 Events:{' '}
-                                {
-                                    events.filter(
-                                        (e) =>
-                                            getMonth(e.start) === getMonth(monthDate) &&
-                                            getYear(e.start) === getYear(monthDate)
-                                    ).length
-                                }
+                                {events.filter((e: ShiftEvent) => getMonth(e.start) === getMonth(monthDate) && getYear(e.start) === getYear(monthDate)).length}
                             </p>
                         </div>
                     ))}
@@ -121,8 +126,8 @@ const MainCalendar: React.FC<{
         // Summary Month view
         const startOfCurrentMonth = startOfMonth(currentWeekStart);
         const endOfCurrentMonth = endOfMonth(currentWeekStart);
-        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 }); // Start from Sunday of the first week
-        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 }); // End on Saturday of the last week
+        const startDay = startOfWeek(startOfCurrentMonth, { weekStartsOn: 0 });
+        const endDay = endOfWeek(endOfCurrentMonth, { weekStartsOn: 0 });
 
         let currentDay = startDay;
         const allDaysInMonthView: Date[] = [];
@@ -134,7 +139,8 @@ const MainCalendar: React.FC<{
         const daysOfWeekHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
         return (
-            <div className='flex flex-col rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+            <div className='flex flex-col rounded-lg border border-gray-300 p-4 shadow-md' style={{ backgroundColor: 'var(--quarter-month-shift)' }}>
+                <TimeDisplay />
                 <h2 className='mb-4 text-center text-2xl font-bold'>
                     {format(currentWeekStart, 'MMMM,yyyy')} Month View
                 </h2>
@@ -150,10 +156,11 @@ const MainCalendar: React.FC<{
                             className={cn(
                                 'flex h-24 flex-col items-center justify-start rounded-md border p-2',
                                 isSameMonth(day, currentWeekStart) ? 'bg-gray-50' : 'bg-gray-100 text-gray-400'
-                            )}>
+                            )}
+                        >
                             <span className='text-sm font-medium'>{format(day, 'd')}</span>
                             <p className='mt-1 text-xs text-gray-600'>
-                                Events: {events.filter((e) => isSameDay(e.start, day)).length}
+                                Events: {events.filter((e: ShiftEvent) => isSameDay(e.start, day)).length}
                             </p>
                         </div>
                     ))}
@@ -164,11 +171,14 @@ const MainCalendar: React.FC<{
 
     // Default rendering for 'week', 'day', 'month-detailed', and 'quarter-detailed' views
     return (
-        <div className='flex flex-col  rounded-lg border border-gray-300 bg-white shadow-md'>
+        <div className='flex flex-col rounded-lg border border-gray-300 bg-white shadow-md'>
+            <TimeDisplay />
             {/* Calendar Header: Groups/Resources, and Days/Hours */}
-            <div className='w-full flex border-b border-gray-200 bg-gray-100'>
-                <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'>
-                    Groups/Resources
+            <div className='flex w-full border-b border-gray-200 bg-yellow-400'>
+                <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'
+                style={{ backgroundColor: 'var(--resource-cell-shift)' }}
+                >
+                    Groups
                 </div>
                 {/* Render "24 Hrs" header for 'day' view */}
                 {currentView === 'day' && (
@@ -177,7 +187,9 @@ const MainCalendar: React.FC<{
                     </div>
                 )}
                 {/* Scrollable Header Content */}
-                <div className='flex flex-grow overflow-x-auto'>
+                <div className='flex flex-grow overflow-x-auto'
+                style={{ backgroundColor: 'var(--header-shift)' }}
+                >
                     {' '}
                     {/* This div now controls horizontal scrolling for the header */}
                     <div
@@ -240,16 +252,16 @@ const MainCalendar: React.FC<{
                                 <div
                                     key={`daily-note-${day.toISOString()}`}
                                     className={cn(
-                                        'relative cursor-pointer  border-r border-gray-200 p-2 text-xs text-gray-700 last:border-r-0',
+                                        'relative cursor-pointer border-r border-gray-200 p-2 text-xs text-gray-700 last:border-r-0',
                                         currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for day, flex-none for week/detailed
                                     )}
                                     style={{
-                                        height: '50px', // Fixed height for daily notes row
+                                        height: '50px',
                                         minHeight: '50px',
                                         width:
                                             currentView === 'day'
                                                 ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
-                                                : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`, // Fixed width for day/week/month/quarter detailed days
+                                                : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
                                         minWidth:
                                             currentView === 'day'
                                                 ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
@@ -267,20 +279,27 @@ const MainCalendar: React.FC<{
             )}
 
             {/* Calendar Body: Shift Groups and Resource Rows */}
-            <div className='flex-grow overflow-y-auto' style={{ maxHeight: 'calc(100vh - 250px)' }}>
-                {shiftGroups.map((group) => (
-                    <div key={group.id} className='mb-2 last:mb-0'>
+            <div
+                className='relative w-full flex-grow overflow-y-auto '
+
+                style={{ backgroundColor: 'var(--group-shift)', maxHeight: 'calc(100vh - 250px)' }}>
+                {shiftGroups.map((group: ShiftGroup) => (
+                    <div key={group.id} className='relative mb-2 w-full last:mb-0'>
                         {/* Group Header Row */}
                         <div
-                            className='w-full flex cursor-pointer border-t border-b border-gray-300 bg-gray-200 transition duration-150 ease-in-out hover:bg-gray-300'
+                            className='flex w-full cursor-pointer border-t border-b border-gray-300'
+                            style={{
+                                width: '100%',
+                                backgroundSize: '100% 100px'
+                                // backgroundColor: '#FFFF00'
+                            }}
                             onClick={() => toggleGroupExpansion(group.id)}>
                             <div className='flex w-32 flex-shrink-0 items-center justify-between border-r border-gray-300 p-3 text-sm font-bold text-gray-900'>
                                 <span>{group.name}</span>
                                 {/* Arrow icon for expand/collapse */}
                                 <svg
-                                    className={`h-4 w-4 transform text-gray-700 transition-transform duration-200 ${
-                                        group.isExpanded ? 'rotate-90' : ''
-                                    }`}
+                                    className={`h-4 w-4 transform text-gray-700 transition-transform duration-200 ${group.isExpanded ? 'rotate-90' : ''
+                                        }`}
                                     fill='none'
                                     stroke='currentColor'
                                     viewBox='0 0 24 24'
@@ -313,10 +332,10 @@ const MainCalendar: React.FC<{
 
                         {/* Resources belonging to this group - conditionally rendered */}
                         {group.isExpanded && (
-                            <div className='transition-all duration-300 ease-in-out'>
+                            <div className='bg-indigo-700 transition-all duration-300 ease-in-out'>
                                 {resources
-                                    .filter((res) => res.groupId === group.id)
-                                    .map((resource) => (
+                                    .filter((res: Resource) => res.groupId === group.id)
+                                    .map((resource: Resource) => (
                                         <ResourceRow
                                             key={resource.id}
                                             resource={resource}
@@ -326,7 +345,7 @@ const MainCalendar: React.FC<{
                                                     : (columnsToDisplay as Date[])
                                             }
                                             currentView={currentView}
-                                            onCellClick={onCellClick} // Pass the click handler
+                                            onCellClick={onCellClick}
                                         />
                                     ))}
                             </div>
@@ -337,4 +356,4 @@ const MainCalendar: React.FC<{
         </div>
     );
 };
-  export default MainCalendar;
+export default MainCalendar;

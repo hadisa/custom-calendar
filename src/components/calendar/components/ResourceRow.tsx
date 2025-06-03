@@ -1,9 +1,11 @@
-"use client"
-import { cn } from "@/lib/utils";
-import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, Resource } from "./type";
-import { useCalendar } from "./context";
-import { isSameDay } from "date-fns";
-import Event from "./Event";
+'use client';
+
+import { cn } from '@/lib/utils';
+
+import Event from './Event';
+import { useCalendar } from './context';
+import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, Resource } from './type';
+import { isSameDay } from 'date-fns';
 
 /**
  * @component ResourceRow
@@ -25,19 +27,19 @@ const ResourceRow: React.FC<{
     const dayViewHourlyMarkers = Array.from({ length: 24 }).map((_, i) => i * 60);
 
     return (
-        <div className='flex border-b border-gray-200 last:border-b-0'>
+        <div className='flex w-full border-b border-gray-200 last:border-b-0'>
             <div className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-200 bg-green-50 p-3 text-sm font-semibold text-gray-800'>
                 {resource.name}
             </div>
             {/* This flex-grow div will contain the horizontally scrolling content */}
-            <div className='relative flex flex-grow'>
+            <div className='relative flex flex-grow '
+              style={{ backgroundColor: 'var(--row-shift)' }}>
                 {daysInView.map((day) => (
                     <div
                         key={day.toISOString()}
                         className={cn(
                             'relative cursor-pointer border-r border-gray-200 last:border-r-0',
-                            
-                         currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for fixed width in all detailed views
+                            currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for fixed width in all detailed views
                         )}
                         style={{
                             height: '100px', // Fixed height for rows in all detailed views
@@ -50,7 +52,14 @@ const ResourceRow: React.FC<{
                                 currentView === 'day'
                                     ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
                                     : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-                            padding: '4px' // Add some padding inside the cell
+                            padding: '4px', // Add some padding inside the cell
+                            backgroundImage:
+                                currentView === 'month-detailed' ||
+                                currentView === 'quarter-detailed' ||
+                                currentView === 'day'
+                                    ? 'linear-gradient(to bottom, transparent calc(100% - 1px), #e5e7eb calc(100% - 1px))'
+                                    : 'none',
+                            backgroundSize: '100% 100px' // Match the cell height
                         }}
                         onClick={(e) => onCellClick(day, e, resource.id)} // Pass the event object and resource.id here
                     >
@@ -69,7 +78,7 @@ const ResourceRow: React.FC<{
                         {resourceEvents
                             .filter((event) => isSameDay(event.start, day))
                             .map((event) => (
-                                <Event 
+                                <Event
                                     key={event.id}
                                     event={event}
                                     resourceColor={resource.color}

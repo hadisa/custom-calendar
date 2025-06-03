@@ -1,10 +1,11 @@
-"use client"
+'use client';
 
-import { isSameDay } from "date-fns";
-import { useCalendar } from "./context";
-import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, ShiftGroup } from "./type";
-import { formatTime } from "./lib";
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils';
+
+import { useCalendar } from './context';
+import { formatTime } from './lib';
+import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, ShiftGroup } from './type';
+import { isSameDay } from 'date-fns';
 
 /**
  * @component OpenShiftsRow
@@ -30,7 +31,7 @@ const OpenShiftsRow: React.FC<{
     };
 
     return (
-        <div className='flex border-b border-gray-200 bg-red-50'>
+        <div className='bg-open-shift flex border-b border-gray-200'  style={{ backgroundColor: 'var(--open-shift)' }}>
             <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-800'>
                 Open shifts
             </div>
@@ -39,7 +40,8 @@ const OpenShiftsRow: React.FC<{
                     {/* Empty cell to align with 24 Hrs header */}
                 </div>
             )}
-            <div className='flex flex-grow'>
+            <div className='relative flex flex-grow'>
+                <div className='absolute inset-0 ' /> {/* Background color that extends when scrolling */}
                 {daysInView.map((day) => (
                     <div
                         key={`open-shift-${group.id}-${day.toISOString()}`}
@@ -57,7 +59,10 @@ const OpenShiftsRow: React.FC<{
                             minWidth:
                                 currentView === 'day'
                                     ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
-                                    : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`
+                                    : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
+                            backgroundImage:
+                                'linear-gradient(to bottom, transparent calc(100% - 1px), #e5e7eb calc(100% - 1px))',
+                            backgroundSize: '100% 50px' // Match the cell height
                         }}
                         onClick={(e) => onCellClick(day, e, openShiftResourceId, group.name)} // Pass openShiftResourceId AND group.name
                     >
@@ -77,4 +82,5 @@ const OpenShiftsRow: React.FC<{
         </div>
     );
 };
-export default  OpenShiftsRow;
+
+export default OpenShiftsRow;
