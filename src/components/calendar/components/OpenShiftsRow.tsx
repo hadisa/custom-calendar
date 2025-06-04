@@ -31,7 +31,7 @@ const OpenShiftsRow: React.FC<{
     };
 
     return (
-        <div className='bg-open-shift flex border-b border-gray-200'  style={{ backgroundColor: 'var(--open-shift)' }}>
+        <div className='bg-open-shift flex border-b border-gray-200' style={{ backgroundColor: 'var(--open-shift)' }}>
             <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-800'>
                 Open shifts
             </div>
@@ -41,7 +41,7 @@ const OpenShiftsRow: React.FC<{
                 </div>
             )}
             <div className='relative flex flex-grow'>
-                <div className='absolute inset-0 ' /> {/* Background color that extends when scrolling */}
+                <div className='absolute inset-0' /> {/* Background color that extends when scrolling */}
                 {daysInView.map((day) => (
                     <div
                         key={`open-shift-${group.id}-${day.toISOString()}`}

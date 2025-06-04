@@ -1,12 +1,23 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import React from 'react';
 
 import OpenShiftsRow from './OpenShiftsRow';
 import ResourceRow from './ResourceRow';
+import TimeDisplay from './TimeDisplay';
+import DayDetails from './DayDetails';
+import MonthDetails from './MonthDetails';
 import { useCalendar } from './context';
 import { formatDateHeader, getDaysInWeek } from './lib';
-import { DAY_VIEW_HOUR_WIDTH_PX, DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, ShiftEvent, ShiftGroup, Resource } from './type';
+import {
+    DAY_VIEW_HOUR_WIDTH_PX,
+    DAY_VIEW_TOTAL_WIDTH_PX,
+    DEFAULT_DAY_COLUMN_MIN_WIDTH_PX,
+    Resource,
+    ShiftEvent,
+    ShiftGroup
+} from './type';
 import {
     addDays,
     addMonths,
@@ -23,7 +34,6 @@ import {
     startOfQuarter,
     startOfWeek
 } from 'date-fns';
-import TimeDisplay from './TimeDisplay';
 
 /**
  * @component MainCalendar
@@ -37,6 +47,8 @@ const MainCalendar: React.FC<{
     onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void;
 }> = ({ currentWeekStart, currentView, onCellClick }) => {
     const { shiftGroups, resources, toggleGroupExpansion, events } = useCalendar();
+    const [selectedDay, setSelectedDay] = React.useState<Date | null>(null);
+    const [selectedMonth, setSelectedMonth] = React.useState<Date | null>(null);
 
     // Determine which days/columns to display based on the current view
     let columnsToDisplay: Date[] = [];
@@ -89,7 +101,13 @@ const MainCalendar: React.FC<{
                             {/* Placeholder for month summary - can be expanded later */}
                             <p className='text-sm text-gray-600'>
                                 Events:{' '}
-                                {events.filter((e: ShiftEvent) => getMonth(e.start) === getMonth(monthDate) && getYear(e.start) === getYear(monthDate)).length}
+                                {
+                                    events.filter(
+                                        (e: ShiftEvent) =>
+                                            getMonth(e.start) === getMonth(monthDate) &&
+                                            getYear(e.start) === getYear(monthDate)
+                                    ).length
+                                }
                             </p>
                         </div>
                     ))}
@@ -104,23 +122,53 @@ const MainCalendar: React.FC<{
         const monthsInQuarter = Array.from({ length: 3 }).map((_, i) => addMonths(startOfCurrentQuarter, i));
 
         return (
-            <div className='flex flex-col rounded-lg border border-gray-300 p-4 shadow-md' style={{ backgroundColor: 'var(--quarter-month-shift)' }}>
-                <TimeDisplay />
-                <h2 className='mb-4 text-center text-2xl font-bold'>
-                    {format(startOfCurrentQuarter, 'MMM d')} - {format(endOfCurrentQuarter, 'MMM d,yyyy')} Quarter View
-                </h2>
-                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3'>
-                    {monthsInQuarter.map((monthDate) => (
-                        <div key={monthDate.toISOString()} className='rounded-lg border bg-gray-50 p-4 text-center'>
-                            <h3 className='mb-2 text-lg font-semibold'>{format(monthDate, 'MMMM')}</h3>
-                            <p className='text-sm text-gray-600'>
-                                Events:{' '}
-                                {events.filter((e: ShiftEvent) => getMonth(e.start) === getMonth(monthDate) && getYear(e.start) === getYear(monthDate)).length}
-                            </p>
-                        </div>
-                    ))}
+            <>
+                <div className='flex flex-col rounded-lg border border-gray-300 bg-white p-4 shadow-md'>
+                    <TimeDisplay />
+                    <h2 className='mb-4 text-center text-2xl font-bold'>
+                        {format(startOfCurrentQuarter, 'MMM d')} - {format(endOfCurrentQuarter, 'MMM d,yyyy')} Quarter View
+                    </h2>
+                    <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3'>
+                        {monthsInQuarter.map((monthDate) => (
+                            <div 
+                                key={monthDate.toISOString()} 
+                                onClick={() => setSelectedMonth(monthDate)}
+                                className='rounded-lg border bg-gray-50 p-4 text-center cursor-pointer hover:bg-gray-100 transition-colors'
+                            >
+                                <h3 className='mb-2 text-lg font-semibold'>{format(monthDate, 'MMMM')}</h3>
+                                <p className='text-sm text-gray-600'>
+                                    Events:{' '}
+                                    {
+                                        events.filter(
+                                            (e: ShiftEvent) =>
+                                                getMonth(e.start) === getMonth(monthDate) &&
+                                                getYear(e.start) === getYear(monthDate)
+                                        ).length
+                                    }
+                                </p>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-            </div>
+                {selectedMonth && (
+                    <MonthDetails
+                        date={selectedMonth}
+                        events={events}
+                        onClose={() => setSelectedMonth(null)}
+                        onDayClick={(date) => {
+                            setSelectedMonth(null);
+                            setSelectedDay(date);
+                        }}
+                    />
+                )}
+                {selectedDay && (
+                    <DayDetails
+                        date={selectedDay}
+                        events={events}
+                        onClose={() => setSelectedDay(null)}
+                    />
+                )}
+            </>
         );
     } else if (currentView === 'month') {
         // Summary Month view
@@ -139,33 +187,44 @@ const MainCalendar: React.FC<{
         const daysOfWeekHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
         return (
-            <div className='flex flex-col rounded-lg border border-gray-300 p-4 shadow-md' style={{ backgroundColor: 'var(--quarter-month-shift)' }}>
-                <TimeDisplay />
-                <h2 className='mb-4 text-center text-2xl font-bold'>
-                    {format(currentWeekStart, 'MMMM,yyyy')} Month View
-                </h2>
-                <div className='mb-2 grid grid-cols-7 text-center font-semibold text-gray-600'>
-                    {daysOfWeekHeaders.map((day) => (
-                        <div key={day}>{day}</div>
-                    ))}
+            <>
+                <div
+                    className='flex flex-col rounded-lg border border-gray-300 bg-white p-4 shadow-md'
+                >
+                    <TimeDisplay />
+                    <h2 className='mb-4 text-center text-2xl font-bold'>
+                        {format(currentWeekStart, 'MMMM,yyyy')} Month View
+                    </h2>
+                    <div className='mb-2 grid grid-cols-7 text-center font-semibold text-gray-600'>
+                        {daysOfWeekHeaders.map((day) => (
+                            <div key={day}>{day}</div>
+                        ))}
+                    </div>
+                    <div className='grid grid-cols-7 gap-1'>
+                        {allDaysInMonthView.map((day) => (
+                            <div
+                                key={day.toISOString()}
+                                onClick={() => setSelectedDay(day)}
+                                className={cn(
+                                    'flex h-24 flex-col items-center justify-start rounded-md border p-2 cursor-pointer hover:bg-gray-100 transition-colors',
+                                    isSameMonth(day, currentWeekStart) ? 'bg-gray-50' : 'bg-gray-100 text-gray-400'
+                                )}>
+                                <span className='text-sm font-medium'>{format(day, 'd')}</span>
+                                <p className='mt-1 text-xs text-gray-600'>
+                                    Events: {events.filter((e: ShiftEvent) => isSameDay(e.start, day)).length}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-                <div className='grid grid-cols-7 gap-1'>
-                    {allDaysInMonthView.map((day) => (
-                        <div
-                            key={day.toISOString()}
-                            className={cn(
-                                'flex h-24 flex-col items-center justify-start rounded-md border p-2',
-                                isSameMonth(day, currentWeekStart) ? 'bg-gray-50' : 'bg-gray-100 text-gray-400'
-                            )}
-                        >
-                            <span className='text-sm font-medium'>{format(day, 'd')}</span>
-                            <p className='mt-1 text-xs text-gray-600'>
-                                Events: {events.filter((e: ShiftEvent) => isSameDay(e.start, day)).length}
-                            </p>
-                        </div>
-                    ))}
-                </div>
-            </div>
+                {selectedDay && (
+                    <DayDetails
+                        date={selectedDay}
+                        events={events}
+                        onClose={() => setSelectedDay(null)}
+                    />
+                )}
+            </>
         );
     }
 
@@ -175,9 +234,9 @@ const MainCalendar: React.FC<{
             <TimeDisplay />
             {/* Calendar Header: Groups/Resources, and Days/Hours */}
             <div className='flex w-full border-b border-gray-200 bg-yellow-400'>
-                <div className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'
-                style={{ backgroundColor: 'var(--resource-cell-shift)' }}
-                >
+                <div
+                    className='w-32 flex-shrink-0 border-r border-gray-200 p-3 text-sm font-semibold text-gray-600'
+                    style={{ backgroundColor: 'var(--resource-cell-shift)' }}>
                     Groups
                 </div>
                 {/* Render "24 Hrs" header for 'day' view */}
@@ -187,9 +246,7 @@ const MainCalendar: React.FC<{
                     </div>
                 )}
                 {/* Scrollable Header Content */}
-                <div className='flex flex-grow overflow-x-auto'
-                style={{ backgroundColor: 'var(--header-shift)' }}
-                >
+                <div className='flex flex-grow overflow-x-auto' style={{ backgroundColor: 'var(--header-shift)' }}>
                     {' '}
                     {/* This div now controls horizontal scrolling for the header */}
                     <div
@@ -280,8 +337,7 @@ const MainCalendar: React.FC<{
 
             {/* Calendar Body: Shift Groups and Resource Rows */}
             <div
-                className='relative w-full flex-grow overflow-y-auto '
-
+                className='relative w-full flex-grow overflow-y-auto'
                 style={{ backgroundColor: 'var(--group-shift)', maxHeight: 'calc(100vh - 250px)' }}>
                 {shiftGroups.map((group: ShiftGroup) => (
                     <div key={group.id} className='relative mb-2 w-full last:mb-0'>
@@ -298,8 +354,9 @@ const MainCalendar: React.FC<{
                                 <span>{group.name}</span>
                                 {/* Arrow icon for expand/collapse */}
                                 <svg
-                                    className={`h-4 w-4 transform text-gray-700 transition-transform duration-200 ${group.isExpanded ? 'rotate-90' : ''
-                                        }`}
+                                    className={`h-4 w-4 transform text-gray-700 transition-transform duration-200 ${
+                                        group.isExpanded ? 'rotate-90' : ''
+                                    }`}
                                     fill='none'
                                     stroke='currentColor'
                                     viewBox='0 0 24 24'
