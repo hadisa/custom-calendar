@@ -41,7 +41,7 @@ import {
  * including date headers and grouped resource rows with their respective events.
  * Renamed from Calendar to avoid naming conflict with the date picker Calendar component.
  */
-const MainCalendar: React.FC<{
+const MainCalendarTwo: React.FC<{
     currentWeekStart: Date;
     currentView: 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed';
     onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void;
@@ -230,7 +230,7 @@ const MainCalendar: React.FC<{
 
     // Default rendering for 'week', 'day', 'month-detailed', and 'quarter-detailed' views
     return (
-        <div className='flex flex-col rounded-lg border border-gray-300 bg-green-900 shadow-md'>
+        <div className='flex flex-col rounded-lg border border-gray-300 bg-white shadow-md'>
             <TimeDisplay />
             {/* Calendar Header: Groups/Resources, and Days/Hours */}
             <div className='flex w-full border-b border-gray-200 bg-yellow-400'>
@@ -413,4 +413,4 @@ const MainCalendar: React.FC<{
         </div>
     );
 };
-export default MainCalendar;
+export default MainCalendarTwo;

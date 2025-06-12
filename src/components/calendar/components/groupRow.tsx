@@ -11,7 +11,7 @@ import { isSameDay } from 'date-fns';
  * @component ResourceRow
  * Renders a single resource's row, displaying their name and events.
  */
-const ResourceRow: React.FC<{
+const GroupRow: React.FC<{
     resource: Resource;
     daysInView: Date[];
     currentView: 'week' | 'day' | 'month-detailed' | 'quarter-detailed';
@@ -27,17 +27,17 @@ const ResourceRow: React.FC<{
     const dayViewHourlyMarkers = Array.from({ length: 24 }).map((_, i) => i * 60);
 
     return (
-        <div className='flex border-b border-gray-100 bg-white hover:bg-gray-50/50'>
-            <div className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-100 p-3 text-sm font-semibold text-gray-800'>
+        <div className='flex border-b border-gray-200 hover:bg-gray-50/50'>
+            <div className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-200 bg-green-50 p-3 text-sm font-semibold text-gray-800'>
                 {resource.name}
             </div>
             {/* This flex-grow div will contain the horizontally scrolling content */}
-            <div className='relative flex flex-grow bg-white'>
+            <div className='relative flex flex-grow'>
                 {daysInView.map((day) => (
                     <div
                         key={day.toISOString()}
                         className={cn(
-                            'relative cursor-pointer border-r border-gray-100 hover:bg-gray-50/50',
+                            'relative cursor-pointer border-r border-gray-200 hover:bg-gray-50/50',
                             currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for fixed width in all detailed views
                         )}
                         style={{
@@ -68,21 +68,9 @@ const ResourceRow: React.FC<{
                                     key={`grid-day-${day.toISOString()}-${minutes}`}
                                     className={cn(
                                         'absolute h-full border-r border-gray-100',
-                                        minutes % 60 === 0 ? 'border-gray-100' : 'border-gray-100' // Thicker line for full hours
+                                        minutes % 60 === 0 ? 'border-gray-200' : 'border-gray-100' // Thicker line for full hours
                                     )}
                                     style={{ left: `${(minutes / (24 * 60)) * 100}%` }}></div>
-                            ))}
-
-                        {/* Render events for this specific day and resource */}
-                        {resourceEvents
-                            .filter((event) => isSameDay(event.start, day))
-                            .map((event) => (
-                                <Event
-                                    key={event.id}
-                                    event={event}
-                                    resourceColor={resource.color}
-                                    currentView={currentView}
-                                />
                             ))}
                     </div>
                 ))}
@@ -91,4 +79,4 @@ const ResourceRow: React.FC<{
     );
 };
 
-export default ResourceRow;
+export default GroupRow;

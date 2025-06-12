@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 
 import Event from './Event';
 import { useCalendar } from './context';
-import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, Resource, ShiftEvent } from './type';
+import { DAY_VIEW_TOTAL_WIDTH_PX, DEFAULT_DAY_COLUMN_MIN_WIDTH_PX, Resource } from './type';
 import { isSameDay } from 'date-fns';
 
 /**
@@ -20,20 +20,15 @@ const ResourceRow: React.FC<{
     const { events } = useCalendar();
 
     const resourceEvents = events.filter(
-        (event: ShiftEvent) => event.resourceId === resource.id && daysInView.some((day) => isSameDay(day, event.start))
+        (event) => event.resourceId === resource.id && daysInView.some((day) => isSameDay(day, event.start))
     );
 
     // For Day view, we need horizontal hourly grid lines
     const dayViewHourlyMarkers = Array.from({ length: 24 }).map((_, i) => i * 60);
 
     return (
-        <div className='flex border-b border-gray-200 transition-colors bg-indigo-600 last:border-b-0 hover:bg-gray-50/50'>
-            <div
-                className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-200 p-3 text-sm font-semibold text-gray-800'
-                style={{
-                    backgroundColor: `${resource.color}15`,
-                    borderColor: `${resource.color}30`
-                }}>
+        <div className='flex w-full border-b border-gray-200 last:border-b-0 hover:bg-gray-50/50'>
+            <div className='flex w-32 flex-shrink-0 items-center justify-center border-r border-gray-200 bg-green-50 p-3 text-sm font-semibold text-gray-800 hover:bg-gray-50/50'>
                 {resource.name}
             </div>
             {/* This flex-grow div will contain the horizontally scrolling content */}
@@ -42,39 +37,44 @@ const ResourceRow: React.FC<{
                     <div
                         key={day.toISOString()}
                         className={cn(
-                            'relative cursor-pointer border-r border-gray-200 transition-colors last:border-r-0 hover:bg-gray-50/50',
-                            currentView === 'day' ? 'flex-none' : 'flex-none'
+                            'relative cursor-pointer border-r border-gray-200 last:border-r-0 hover:bg-gray-50/50',
+                            currentView === 'day' ? 'flex-none' : 'flex-none' // flex-none for fixed width in all detailed views
                         )}
                         style={{
-                            height: '100px',
-                            minHeight: '100px',
+                            height: '100px', // Fixed height for rows in all detailed views
+                            minHeight: '100px', // Min height for consistency
                             width:
                                 currentView === 'day'
                                     ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
-                                    : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
+                                    : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`, // Fixed width for day/week/month/quarter detailed days
                             minWidth:
                                 currentView === 'day'
                                     ? `${DAY_VIEW_TOTAL_WIDTH_PX}px`
                                     : `${DEFAULT_DAY_COLUMN_MIN_WIDTH_PX}px`,
-                            padding: '4px'
+                            padding: '4px', // Add some padding inside the cell
+                            backgroundImage:
+                                currentView === 'month-detailed' || currentView === 'quarter-detailed'
+                                    ? 'linear-gradient(to bottom, transparent calc(100% - 1px), #e5e7eb calc(100% - 1px))'
+                                    : 'none',
+                            backgroundSize: '100% 100px' // Match the cell height
                         }}
-                        onClick={(e) => onCellClick(day, e, resource.id)}>
+                        onClick={(e) => onCellClick(day, e, resource.id)} // Pass the event object and resource.id here
+                    >
                         {currentView === 'day' &&
                             dayViewHourlyMarkers.map((minutes) => (
                                 <div
                                     key={`grid-day-${day.toISOString()}-${minutes}`}
                                     className={cn(
-                                        'absolute h-full border-r',
-                                        minutes % 60 === 0 ? 'border-gray-200' : 'border-gray-100'
+                                        'absolute h-full border-r border-gray-100',
+                                        minutes % 60 === 0 ? 'border-gray-200' : 'border-gray-100' // Thicker line for full hours
                                     )}
-                                    style={{ left: `${(minutes / (24 * 60)) * 100}%` }}
-                                />
+                                    style={{ left: `${(minutes / (24 * 60)) * 100}%` }}></div>
                             ))}
 
                         {/* Render events for this specific day and resource */}
                         {resourceEvents
-                            .filter((event: ShiftEvent) => isSameDay(event.start, day))
-                            .map((event: ShiftEvent) => (
+                            .filter((event) => isSameDay(event.start, day))
+                            .map((event) => (
                                 <Event
                                     key={event.id}
                                     event={event}

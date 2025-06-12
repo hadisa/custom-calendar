@@ -9,12 +9,12 @@
 @tailwind utilities;
 
 :root {
-    --open-shift: hsl(0, 0%, 98%);
-    --group-shift: hsl(220, 56%, 85%);
-    --row-shift: hsl(0 0% 100%);
+    --open-shift: hsl(135, 80%, 44%);
+    --group-shift: hsl(0, 0%, 95%);
+    --row-shift: hsl(0, 52%, 42%);
     --header-shift: hsl(0 0% 100%);
-    --quarter-month-shift: hsl(0 0% 100%);
-    --resource-cell-shift: hsl(0 0% 100%);
+    --quarter-month-shift: hsl(54, 87%, 53%);
+    --resource-cell-shift: hsl(234, 60%, 82%);
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;

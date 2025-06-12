@@ -1,3 +1,4 @@
+"use client"
 /**
  * @component Calendar
  * The main calendar component that displays the week view,

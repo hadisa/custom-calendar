@@ -20,6 +20,7 @@ export interface ShiftGroup {
     id: string;
     name: string;
     isExpanded: boolean; // Added for expand/collapse functionality
+    color?: string; // Added color property
 }
 
 /**
@@ -45,6 +46,7 @@ export interface ShiftEvent {
     start: Date;
     end: Date;
     color?: string; // Optional color property for custom event colors
+    status?: string; // Added status property
 }
 
 /**
@@ -60,4 +62,13 @@ export interface CalendarContextType {
     toggleGroupExpansion: (groupId: string) => void; // Reverted to sync
     deleteEvent: (eventId: string) => void; // Reverted to sync
     // Removed userId, isLoading
+}
+
+export type CalendarView = 'week' | 'day' | 'year' | 'quarter' | 'month' | 'month-detailed' | 'quarter-detailed';
+
+// Props interface
+export interface MainCalendarProps {
+    currentWeekStart: Date;
+    currentView: CalendarView;
+    onCellClick: (date: Date, event: React.MouseEvent, resourceId?: string, groupName?: string) => void;
 }
